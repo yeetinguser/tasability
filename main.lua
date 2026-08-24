@@ -83,7 +83,8 @@ local TASFreeze = {
     ReplayCharacterCollisionStates=nil, ReplayAnimateScript=nil, ReplayAnimateScriptDisabled=nil, FrozenCameraFollowsReplay=false,
     FrozenMouseBehavior=nil, PendingRecordingStart=false, PendingReadingStart=false, COInitializationQueued=false,
     FrozenCameraType=nil, FrozenCameraBindName="TasabilityFrozenCamera", FrozenCharacterBindName="TasabilityFrozenCharacter", FrozenCameraCFrame=nil, FrozenHeldCO=false,
-    ResumeCFrame=nil, ResumeVelocity=nil, ResumeRotVelocity=nil, ResumeHumanoidState=nil, ResumeAnimPose=nil, ResumeAnimSpeed=nil,
+    ResumeCFrame=nil, ResumeVelocity=nil, ResumeRotVelocity=nil, ResumeHumanoidState=nil, ResumeAnimPose=nil, ResumeAnimSpeed=nil, ResumeShiftLockEnabled=nil, PhysicsOverrideActive=false,
+    FrozenAnimTrack=nil, FrozenAnimName=nil, FrozenAnimTime=nil, FrozenAnimSpeed=nil,
 }
 local TASPause = {PausedCharacterCFrame=nil, PausedCameraCFrame=nil, PausedCameraType=nil, PausedCameraBindName="TasabilityPausedCamera", PendingRecordingFlush=false, CachedAnimateScript=nil, PlaybackWarmCache={}}
 local function ClearPlaybackWarmCache()
@@ -4693,6 +4694,9 @@ do
 			end
 
 			setAnimationSpeed = function(speed)
+				-- Humanoid Running/Climbing callbacks may fire while anchored. Do not let
+				-- them alter the animation speed we are deliberately holding at freeze.
+				if TASFreeze.Frozen then return end
 				speed = tonumber(speed) or 0
 				TASAnimation.currentAnimSpeed = speed
 				if currentAnimTrack then
@@ -4714,6 +4718,11 @@ do
 
 			playAnimation = function(animName, transitionTime, humanoid, bypassAnimateDisabled, forceRestart) 
 				pcall(function()
+					-- Keep the live recording animation intact while frozen. Explicit frozen-frame
+					-- reconstruction uses bypassAnimateDisabled=true.
+					if TASFreeze.Frozen and not bypassAnimateDisabled then
+						return
+					end
 					if TASRuntime.AnimateDisabled and not bypassAnimateDisabled then
 						return
 					end
@@ -7143,15 +7152,66 @@ do
             TASFreeze.ResumeHumanoidState = nil
             TASFreeze.ResumeAnimPose = nil
             TASFreeze.ResumeAnimSpeed = nil
+            TASFreeze.FrozenAnimTrack = nil
+            TASFreeze.FrozenAnimName = TASAnimation.currentAnimName
+            TASFreeze.FrozenAnimTime = nil
+            TASFreeze.FrozenAnimSpeed = nil
+            TASFreeze.ResumeShiftLockEnabled = TASServices.ShiftLockEnabled
+            TASFreeze.PhysicsOverrideActive = false
+
+            -- Snapshot the exact live animation at the instant freeze is pressed.
+            -- The last recorded TAS frame is not authoritative for the visual state
+            -- during a recording freeze.
+            pcall(function()
+                local track = TASAnimation.currentAnimTrack
+                if track and track.Parent then
+                    TASFreeze.FrozenAnimTrack = track
+                    TASFreeze.FrozenAnimName = TASAnimation.currentAnimName
+                    TASFreeze.FrozenAnimTime = tonumber(track.TimePosition) or 0
+                    TASFreeze.FrozenAnimSpeed = tonumber(track.Speed) or tonumber(TASAnimation.currentAnimSpeed) or 1
+                    TASFreeze.ResumeAnimPose = TASAnimation.pose
+                    TASFreeze.ResumeAnimSpeed = TASFreeze.FrozenAnimSpeed
+                    track:AdjustSpeed(0)
+                end
+            end)
+            TASPause.PlaybackWarmCache._FreezeInitial = true
+
+            -- Preserve the actual live physics state at the exact moment freeze is
+            -- requested. The recording is sampled at TAS FPS, so its last frame can
+            -- be slightly older than the real jump/fall state.
+            pcall(function()
+                local character = TASCharacter.Character
+                local hrp = character and character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    TASFreeze.ResumeCFrame = hrp.CFrame
+                    TASFreeze.ResumeVelocity = hrp.AssemblyLinearVelocity
+                    TASFreeze.ResumeRotVelocity = hrp.AssemblyAngularVelocity
+                end
+                if TASCharacter.Humanoid then
+                    TASFreeze.ResumeHumanoidState = TASCharacter.Humanoid:GetState().Value
+                end
+            end)
+
             do
                 local freezeFrameData = TASRuntime.ReplayTable[math.clamp(TASUtilityFunctions.RoundNumber(TASFreeze.FreezeFrame, 0), 1, math.max(#TASRuntime.ReplayTable, 1))]
                 if type(freezeFrameData) == "table" then
-                    if freezeFrameData[1] then TASFreeze.ResumeCFrame = FastTableToCFrame(freezeFrameData[1]) end
-                    if freezeFrameData[5] then TASFreeze.ResumeVelocity = FastTableToVector3(freezeFrameData[5]) end
-                    if freezeFrameData[6] then TASFreeze.ResumeRotVelocity = FastTableToVector3(freezeFrameData[6]) end
-                    TASFreeze.ResumeHumanoidState = freezeFrameData[4]
-                    TASFreeze.ResumeAnimPose = freezeFrameData[9]
-                    TASFreeze.ResumeAnimSpeed = freezeFrameData[3]
+                    -- The replay frame is still used for animation metadata.
+                    -- Physical resume data was captured from the live character above
+                    -- so a jump/fall is not flattened by frame quantization.
+                    if not TASFreeze.ResumeCFrame and freezeFrameData[1] then
+                        TASFreeze.ResumeCFrame = FastTableToCFrame(freezeFrameData[1])
+                    end
+                    if not TASFreeze.ResumeVelocity and freezeFrameData[5] then
+                        TASFreeze.ResumeVelocity = FastTableToVector3(freezeFrameData[5])
+                    end
+                    if not TASFreeze.ResumeRotVelocity and freezeFrameData[6] then
+                        TASFreeze.ResumeRotVelocity = FastTableToVector3(freezeFrameData[6])
+                    end
+                    if TASFreeze.ResumeHumanoidState == nil then TASFreeze.ResumeHumanoidState = freezeFrameData[4] end
+                    if not TASFreeze.FrozenAnimTrack then
+                        TASFreeze.ResumeAnimPose = freezeFrameData[9]
+                        TASFreeze.ResumeAnimSpeed = freezeFrameData[3]
+                    end
                 end
             end
             ReleaseAllPlaybackKeys()
@@ -7160,43 +7220,6 @@ do
                 if CO.AnchorAll then CO.AnchorAll() end
             end
 
-            -- Freeze the actual player immediately; CO only manages recorded objects.
-            pcall(function()
-                local character = TASCharacter.Character
-                local hrp = character and character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    hrp.Anchored = true
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                    hrp.AssemblyAngularVelocity = Vector3.zero
-                    hrp.Velocity = Vector3.zero
-                    hrp.RotVelocity = Vector3.zero
-                end
-                if TASCharacter.Humanoid then
-                    TASCharacter.Humanoid.PlatformStand = true
-                end
-            end)
-
-            -- Keep the player frozen even if game code attempts to unanchor/move it.
-            pcall(function()
-                TASServices.RunService:UnbindFromRenderStep(TASFreeze.FrozenCharacterBindName)
-                TASServices.RunService:BindToRenderStep(
-                    TASFreeze.FrozenCharacterBindName,
-                    Enum.RenderPriority.Character.Value + 10,
-                    function()
-                        if not TASFreeze.Frozen then return end
-                        local character = TASCharacter.Character
-                        local hrp = character and character:FindFirstChild("HumanoidRootPart")
-                        if hrp then
-                            hrp.Anchored = true
-                            hrp.AssemblyLinearVelocity = Vector3.zero
-                            hrp.AssemblyAngularVelocity = Vector3.zero
-                        end
-                        if TASCharacter.Humanoid then
-                            TASCharacter.Humanoid.PlatformStand = true
-                        end
-                    end
-                )
-            end)
 
             -- Freeze the mouse position independently of the camera-freeze option.
             pcall(function()
@@ -7258,8 +7281,12 @@ do
             TASFreeze.FrozenMouseBehavior = nil
             TASFreeze.FrozenCameraCFrame = nil
             TASFreeze.FrozenCameraType = nil
+            TASFreeze.PhysicsOverrideActive = false
             TASFreeze.Frozen = false
             pcall(function()
+                -- Always release the real character. Normal freeze anchors it too;
+                -- the important distinction is that the resume state comes from the
+                -- live character captured at the instant freeze was pressed.
                 local character = TASCharacter.Character
                 local hrp = character and character:FindFirstChild("HumanoidRootPart")
                 if hrp then
@@ -7271,26 +7298,75 @@ do
                 if not AllowChangingPhysics then
                     ApplyConfiguredPhysics(false)
                 end
-                -- Restore the selected replay frame after unanchoring. Without
-                -- this, the frozen-character heartbeat has already zeroed the
-                -- jump/fall velocity, so unfreezing causes an immediate drop.
+
+                if TASCharacter.Humanoid and TASFreeze.ResumeHumanoidState ~= nil then
+                    pcall(function() TASCharacter.Humanoid:ChangeState(TASFreeze.ResumeHumanoidState) end)
+                end
+                -- Restore the exact animation track/time after ChangeState, because
+                -- unfreezing can fire a state callback that otherwise swaps it.
+                pcall(function()
+                    local track = TASFreeze.FrozenAnimTrack
+                    if track and track.Parent then
+                        if TASFreeze.FrozenAnimTime ~= nil then
+                            track.TimePosition = TASFreeze.FrozenAnimTime
+                        end
+                        local speed = tonumber(TASFreeze.FrozenAnimSpeed or TASFreeze.ResumeAnimSpeed) or 1
+                        track:AdjustSpeed(speed)
+                        TASAnimation.currentAnimTrack = track
+                        TASAnimation.currentAnimName = TASFreeze.FrozenAnimName or TASAnimation.currentAnimName
+                        TASAnimation.currentAnimSpeed = speed
+                    end
+                end)
                 if hrp then
                     if TASFreeze.ResumeCFrame then hrp.CFrame = TASFreeze.ResumeCFrame end
-                    if TASFreeze.ResumeVelocity then
-                        hrp.AssemblyLinearVelocity = TASFreeze.ResumeVelocity
-                        hrp.Velocity = TASFreeze.ResumeVelocity
-                    end
                     if TASFreeze.ResumeRotVelocity then
                         hrp.AssemblyAngularVelocity = TASFreeze.ResumeRotVelocity
                         hrp.RotVelocity = TASFreeze.ResumeRotVelocity
                     end
+                    if TASFreeze.ResumeVelocity then
+                        hrp.AssemblyLinearVelocity = TASFreeze.ResumeVelocity
+                        hrp.Velocity = TASFreeze.ResumeVelocity
+                    end
                 end
-                if TASCharacter.Humanoid and TASFreeze.ResumeHumanoidState ~= nil then
-                    pcall(function() TASCharacter.Humanoid:ChangeState(TASFreeze.ResumeHumanoidState) end)
+
+                -- Roblox may recalculate the humanoid assembly on the first physics
+                -- step after unanchoring. Reapply the captured velocity once after
+                -- Heartbeat so a jump/fall continues with its original Y velocity.
+                local resumeVelocity = TASFreeze.ResumeVelocity
+                local resumeRotVelocity = TASFreeze.ResumeRotVelocity
+                if resumeVelocity or resumeRotVelocity then
+                    task.spawn(function()
+                        TASServices.RunService.Heartbeat:Wait()
+                        pcall(function()
+                            local currentCharacter = TASCharacter.Character
+                            local currentHRP = currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart")
+                            if currentHRP and not TASFreeze.Frozen then
+                                if resumeRotVelocity then
+                                    currentHRP.AssemblyAngularVelocity = resumeRotVelocity
+                                    currentHRP.RotVelocity = resumeRotVelocity
+                                end
+                                if resumeVelocity then
+                                    currentHRP.AssemblyLinearVelocity = resumeVelocity
+                                    currentHRP.Velocity = resumeVelocity
+                                end
+                            end
+                        end)
+                    end)
                 end
                 if TASFreeze.ResumeAnimPose then TASAnimation.pose = TASFreeze.ResumeAnimPose end
                 if TASFreeze.ResumeAnimSpeed then pcall(setAnimationSpeed, TASFreeze.ResumeAnimSpeed) end
             end)
+
+            -- Freeze must be transparent to Shift Lock: restore exactly the state
+            -- that existed before M/FREEZE was pressed.
+            if TASFreeze.ResumeShiftLockEnabled ~= nil and TASServices.ShiftLockEnabled ~= TASFreeze.ResumeShiftLockEnabled then
+                pcall(function() TASFunctions.SetShiftLockEnabled(TASFreeze.ResumeShiftLockEnabled) end)
+            end
+            TASFreeze.ResumeShiftLockEnabled = nil
+            TASFreeze.FrozenAnimTrack = nil
+            TASFreeze.FrozenAnimName = nil
+            TASFreeze.FrozenAnimTime = nil
+            TASFreeze.FrozenAnimSpeed = nil
             if DoNotRecord then
                 SetColorCodeFrame("Idle")
             else
@@ -7450,7 +7526,7 @@ do
 		end
 	end
 	
-	if Input.KeyCode == Enum.KeyCode.LeftShift and not TASRuntime.Reading and not GameProcessed then
+	if Input.KeyCode == Enum.KeyCode.LeftShift and not TASRuntime.Reading and not TASFreeze.Frozen and not GameProcessed then
 		TASFunctions.SetShiftLockEnabled(not TASServices.ShiftLockEnabled)
 	end
 	
@@ -8391,12 +8467,23 @@ TASPause.PlaybackWarmCache.ProcessFreezeFrame = function(RoundedFreezeFrame)
     end
 
     -- Snapshot the exact replay state used by unfreeze and by the Player Viewer.
+    -- On the first freeze, keep the live physics snapshot taken at the instant
+    -- freeze was pressed. Once the user seeks to another frame, switch the resume
+    -- state to that selected replay frame.
     local CurrentFrame = TASRuntime.ReplayTable[RoundedFreezeFrame]
     if type(CurrentFrame) == "table" then
-        if CurrentFrame[1] then TASFreeze.ResumeCFrame = FastTableToCFrame(CurrentFrame[1]) end
-        if CurrentFrame[5] then TASFreeze.ResumeVelocity = FastTableToVector3(CurrentFrame[5]) end
-        if CurrentFrame[6] then TASFreeze.ResumeRotVelocity = FastTableToVector3(CurrentFrame[6]) end
-        TASFreeze.ResumeHumanoidState = CurrentFrame[4]
+        if FrameChanged then
+            if CurrentFrame[1] then TASFreeze.ResumeCFrame = FastTableToCFrame(CurrentFrame[1]) end
+            if CurrentFrame[5] then TASFreeze.ResumeVelocity = FastTableToVector3(CurrentFrame[5]) end
+            if CurrentFrame[6] then TASFreeze.ResumeRotVelocity = FastTableToVector3(CurrentFrame[6]) end
+            TASFreeze.ResumeHumanoidState = CurrentFrame[4]
+        elseif TASFreeze.ResumeCFrame == nil then
+            -- Defensive fallback for an empty/missing live snapshot.
+            if CurrentFrame[1] then TASFreeze.ResumeCFrame = FastTableToCFrame(CurrentFrame[1]) end
+            if CurrentFrame[5] then TASFreeze.ResumeVelocity = FastTableToVector3(CurrentFrame[5]) end
+            if CurrentFrame[6] then TASFreeze.ResumeRotVelocity = FastTableToVector3(CurrentFrame[6]) end
+            TASFreeze.ResumeHumanoidState = CurrentFrame[4]
+        end
         TASFreeze.ResumeAnimPose = CurrentFrame[9] or AnimatePose
         TASFreeze.ResumeAnimSpeed = tonumber(CurrentFrame[3]) or 1
     end
@@ -8528,14 +8615,25 @@ TASPause.PlaybackWarmCache.ProcessFreezeFrame = function(RoundedFreezeFrame)
         TASAnimation.currentAnimName = CachedAnimName
     end
 
-    -- A frozen frame must freeze the animation track too. The recorded speed is
-    -- retained in ResumeAnimSpeed and restored when unfreezing.
-    pcall(setAnimationSpeed, 0)
+    -- A frozen frame must freeze the animation track too.
+    pcall(function()
+        if TASAnimation.currentAnimTrack and TASAnimation.currentAnimTrack.Parent then
+            TASAnimation.currentAnimTrack:AdjustSpeed(0)
+        end
+    end)
 
-    TASCharacter.Humanoid:ChangeState(HumanoidState)
-    TASCharacter.Character.HumanoidRootPart.Velocity = HumanoidRootPartVelocity
-    TASCharacter.Character.HumanoidRootPart.RotVelocity = HumanoidRootPartRotVelocity
-    TASCharacter.Character.HumanoidRootPart.CFrame = HumanoidRootPartCFrame
+    -- Do not touch live character physics during a plain freeze. This matches the
+    -- old implementation: freezing the TAS timeline must not cancel an in-progress
+    -- jump. Physical replay-frame seeking is enabled only after the user actually
+    -- moves to another frozen frame.
+    if TASFreeze.PhysicsOverrideActive then
+        TASCharacter.Humanoid:ChangeState(HumanoidState)
+        TASCharacter.Character.HumanoidRootPart.CFrame = HumanoidRootPartCFrame
+        TASCharacter.Character.HumanoidRootPart.AssemblyAngularVelocity = HumanoidRootPartRotVelocity
+        TASCharacter.Character.HumanoidRootPart.RotVelocity = HumanoidRootPartRotVelocity
+        TASCharacter.Character.HumanoidRootPart.AssemblyLinearVelocity = HumanoidRootPartVelocity
+        TASCharacter.Character.HumanoidRootPart.Velocity = HumanoidRootPartVelocity
+    end
 
     if not (movecameraonfroze and movecameraonfroze.Value) then
         TASFreeze.FrozenCameraCFrame = FrameCameraCFrame
@@ -8569,33 +8667,48 @@ end
 spawn(function() -- Handling freezing
     while true do
         if TASFreeze.Frozen then
-            pcall(function()
-                local character = TASCharacter.Character
-                local hrp = character and character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    hrp.Anchored = true
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                    hrp.AssemblyAngularVelocity = Vector3.zero
-                end
-                if TASCharacter.Humanoid then
-                    TASCharacter.Humanoid.PlatformStand = true
-                end
-            end)
+            local character = TASCharacter.Character
+            local hrp = character and character:FindFirstChild("HumanoidRootPart")
+
+            -- Normal freeze: physically freeze the player in place, but do NOT
+            -- rebuild the character from the replay frame. The live velocity/state
+            -- captured in Freeze() is the authoritative resume state.
+            if hrp then
+                hrp.Anchored = true
+            end
+            -- Anchoring the root is enough to hold the recorded character still.
+            -- Do NOT force PlatformStand here: the custom Animate loop treats the
+            -- resulting PlatformStanding pose as a reason to stop/destroy the
+            -- current animation track. The live animation is intentionally held
+            -- separately above.
+
             if TASFreeze.FreezeFrame > 0 and TASFreeze.FreezeFrame <= #TASRuntime.ReplayTable then
                 local RoundedFreezeFrame = TASUtilityFunctions.RoundNumber(TASFreeze.FreezeFrame, 0)
-                if TASPause.PlaybackWarmCache._FreezeLastProcessed ~= RoundedFreezeFrame then
+                local previousProcessed = TASPause.PlaybackWarmCache._FreezeLastProcessed
+
+                if previousProcessed == nil then
+                    -- Initial freeze: keep the live character exactly where it was.
+                    TASPause.PlaybackWarmCache._FreezeLastProcessed = RoundedFreezeFrame
+                    TASPause.PlaybackWarmCache._FreezeInitial = false
+                elseif previousProcessed ~= RoundedFreezeFrame then
+                    -- Actual frame seek: now it is intentional to reconstruct the
+                    -- character from the selected replay frame.
+                    TASFreeze.PhysicsOverrideActive = true
                     TASPause.PlaybackWarmCache.ProcessFreezeFrame(RoundedFreezeFrame)
-                else
-                    CO.AnchorAll()
                 end
+
+                CO.AnchorAll()
+
                 if not (movecameraonfroze and movecameraonfroze.Value) and TASFreeze.FrozenCameraCFrame and workspace.CurrentCamera then
                     workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
                     workspace.CurrentCamera.CFrame = TASFreeze.FrozenCameraCFrame
                 end
             end
         else
+            TASFreeze.PhysicsOverrideActive = false
             TASPause.PlaybackWarmCache._FreezeLastProcessed = nil
             TASPause.PlaybackWarmCache._FreezePressedKeys = {}
+            TASPause.PlaybackWarmCache._FreezeInitial = nil
         end
         TASServices.RunService.RenderStepped:Wait()
     end
