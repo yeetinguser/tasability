@@ -47,9 +47,9 @@ local TASConfig = {
     ReplayFileBeginning = "{\"Replay\":" ,
     ReplayFileEnding = "}",
     AHKConnectionFolderPath = "Replayability+_AHK",
-    AHKConnectionRequestPath = "Replayability+_AHK/Request",
-    TASCompressionLevel = 3, -- Save-only Zstd level. Lower = faster save, higher = smaller file. Playback is unaffected.
-    FIRST_RECORD_FIX = "CO_READY_BEFORE_WRITE__KEEP_CO_ON_RESET__READ_FROM_DISK_AFTER_SAVE",
+    AHKConnectionRequestPath = "Replayability+_AHK/Request", -- AHKConnection is needed to input scroll mouse: download it from this link - https://github.com/plusgiant5/Libraries/raw/d96e61f24d2439f0f9405087054f169e5a50e1c4/AHKConnection/AHKConnection.exe
+    TASCompressionLevel = 3, -- Zstd: 1 = minimum compression/fastest, 22 = maximum compression/smallest.
+    FIRST_RECORD_FIX = "flush_fix",
 }
 
 local TASServices = {
@@ -4223,7 +4223,11 @@ local allowClientObjectManipulation = addCheckbox(tasSettingsSec, {
         TASConfig.AllowClientObjectManipulation = self.Value == true
         if not TASConfig.AllowClientObjectManipulation then
             pcall(function()
+                -- Disabling CO means TAS must completely stop touching client objects.
+                -- Restore any physics state first; CO.Stop() destroys the registry and
+                -- therefore would otherwise lose the original Anchored states.
                 if CO and CO.ReleaseHeldState then CO.ReleaseHeldState() end
+                if CO and CO.RestoreAnchors then CO.RestoreAnchors() end
                 if CO and CO.Stop then CO.Stop() end
                 if CO then
                     CO._initialized = false
@@ -7030,11 +7034,13 @@ end
             elseif CO._initialized and CO.Stop then
                 pcall(CO.Stop)
             end
-            CO.BeginPlaybackCleanup()
-            CO.ResetTargets()
-            CO._coDataWarned = false
-            CO._replayHasNoCO = false
-            CO.AnchorAll()
+            if TASConfig.AllowClientObjectManipulation then
+                CO.BeginPlaybackCleanup()
+                CO.ResetTargets()
+                CO._coDataWarned = false
+                CO._replayHasNoCO = false
+                CO.AnchorAll()
+            end
 
             if not TASPause.CachedAnimateScript or not TASPause.CachedAnimateScript.Parent then
                 TASPause.CachedAnimateScript = findAnimateScript(TASCharacter.Character)
@@ -8724,7 +8730,9 @@ spawn(function() -- Handling freezing
                     TASPause.PlaybackWarmCache.ProcessFreezeFrame(RoundedFreezeFrame)
                 end
 
-                CO.AnchorAll()
+                if TASConfig.AllowClientObjectManipulation and CO.AnchorAll then
+                    CO.AnchorAll()
+                end
 
                 if not (movecameraonfroze and movecameraonfroze.Value) and TASFreeze.FrozenCameraCFrame and workspace.CurrentCamera then
                     workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
