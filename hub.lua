@@ -1,0 +1,2 @@
+-- this is a hub script deciding whether you're playing on pc or mobile
+-- yeah, there will be mobile support for tasability only FOLK version
