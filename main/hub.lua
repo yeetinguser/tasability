@@ -1,2 +1,0 @@
--- there will be main file
--- in which there will be both pc and mobile version of tasability FOLK version
