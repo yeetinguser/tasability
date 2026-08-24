@@ -1,113 +1,72 @@
 local HttpService = game:GetService("HttpService")
-
 local httprequest = request or http_request or (http and http.request)
 
-local Discord = {}
+local DiscordInvite = "https://discord.gg/hJGAvDXmjj"
 
-local function getInviteCode(invite)
-    if type(invite) ~= "string" then
-        return nil, "invite must be a string"
-    end
-
-    local code = invite:match("discord%.gg/([^%s/?#]+)")
-        or invite:match("discord%.com/invite/([^%s/?#]+)")
-        or invite
-
-    code = tostring(code):gsub("%s+", "")
-
-    if code == "" then
-        return nil, "invalid invite"
-    end
-
-    return code
-end
-
-local function getInviteData(code)
+return function()
     if type(httprequest) ~= "function" then
-        return nil, "HTTP request function unavailable"
+        return false, "HTTP request unavailable"
+    end
+
+    local code = DiscordInvite:match("discord%.gg/([^%s/?#]+)")
+        or DiscordInvite:match("discord%.com/invite/([^%s/?#]+)")
+
+    if not code then
+        return false, "Invalid Discord invite"
     end
 
     local ok, response = pcall(function()
         return httprequest({
-            Url = "https://ptb.discord.com/api/invites/" .. tostring(code),
-            Method = "GET",
+            Url = "https://ptb.discord.com/api/invites/" .. code,
+            Method = "GET"
         })
     end)
 
     if not ok then
-        return nil, "invite request failed: " .. tostring(response)
-    end
-
-    if type(response) ~= "table" then
-        return nil, "invalid invite response"
+        return false, "Invite request failed: " .. tostring(response)
     end
 
     local status = tonumber(response.StatusCode or response.Status)
     if status and status ~= 200 then
-        return nil, "invite API status: " .. tostring(status)
+        return false, "Discord API status: " .. tostring(status)
     end
 
-    if type(response.Body) ~= "string" or response.Body == "" then
-        return nil, "empty invite API response"
-    end
-
-    local okDecode, data = pcall(function()
+    local decodeOk, data = pcall(function()
         return HttpService:JSONDecode(response.Body)
     end)
 
-    if not okDecode or type(data) ~= "table" then
-        return nil, "failed to decode invite data"
+    if not decodeOk or type(data) ~= "table" then
+        return false, "Failed to decode Discord response"
     end
 
-    return data
-end
+    local finalCode = tostring(data.code or code)
 
-function Discord.Join(invite)
-    local code, err = getInviteCode(invite)
-    if not code then
-        return false, err
-    end
-
-    local inviteData
-    inviteData, err = getInviteData(code)
-
-    if not inviteData then
-        return false, err
-    end
-
-    local finalCode = tostring(inviteData.code or code)
-
-    local ok, response = pcall(function()
+    local rpcOk, rpcResponse = pcall(function()
         return httprequest({
             Url = "http://127.0.0.1:6463/rpc?v=1",
             Method = "POST",
             Headers = {
                 ["Content-Type"] = "application/json",
-                ["Origin"] = "https://ptb.discord.com",
+                ["Origin"] = "https://ptb.discord.com"
             },
             Body = HttpService:JSONEncode({
                 cmd = "INVITE_BROWSER",
                 args = {
-                    code = finalCode,
+                    code = finalCode
                 },
-                nonce = HttpService:GenerateGUID(false),
-            }),
+                nonce = HttpService:GenerateGUID(false)
+            })
         })
     end)
 
-    if not ok then
-        return false, "Discord RPC failed: " .. tostring(response)
+    if not rpcOk then
+        return false, "Discord RPC failed: " .. tostring(rpcResponse)
     end
 
-    local status = type(response) == "table"
-        and tonumber(response.StatusCode or response.Status)
-        or nil
-
-    if status and status ~= 200 then
-        return false, "Discord RPC status: " .. tostring(status)
+    local rpcStatus = tonumber(rpcResponse.StatusCode or rpcResponse.Status)
+    if rpcStatus and rpcStatus ~= 200 then
+        return false, "Discord RPC status: " .. tostring(rpcStatus)
     end
 
-    return true, "Discord invite request sent"
+    return true
 end
-
-return Discord
