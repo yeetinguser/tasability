@@ -75,6 +75,7 @@ local TASRuntime = {
     ActiveReplayFPS=TASConfig.TASRecordingFPS, ReplaySourceFPS=TASConfig.TASRecordingFPS,
     ReplaySaveState={Version=0, Encoded=nil, EncodedVersion=-1}, SaveGeneration=0, PlaybackAccumulator=0, PlaybackSourcePosition=1,
     RecordingAccumulator=0, RecordingInterval=0, PlaybackInterval=0, ReplayRootWasAnchored=false, ReplayTableIndex=0, AnimationQueue={}, ForceAnimationSync=false, RunSpeed=0, ClimbSpeed=0,
+    RecordingFlushDeadline=0, RecordingLoopLastTick=0, RecordingStopGeneration=0,
     HumanoidStateQueue={}, InputBeganQueue={}, InputEndedQueue={}, Cursor=Instance.new("ImageLabel"), CursorIcon=nil, CursorSize=nil,
     CursorOffset=nil, Dead=false, CameraCFrame=workspace.CurrentCamera.CFrame, Pressed={}, IgnoreGameProcessed=false,
 }
@@ -6689,6 +6690,11 @@ do
 	end
 	TASFunctions.StartRecording = function()
 		if not TASRuntime.Reading then
+            -- Start a new recording session and invalidate any stale flush request
+            -- left by a previous stop. The recorder loop owns final-frame capture.
+            TASRuntime.RecordingStopGeneration = TASRuntime.RecordingStopGeneration + 1
+            TASRuntime.RecordingFlushDeadline = 0
+            TASPause.PendingRecordingFlush = false
 			if CO.ReleaseHeldState then pcall(CO.ReleaseHeldState) end
 			if TASConfig.AllowClientObjectManipulation then
 				-- Prepare CO completely BEFORE enabling Writing.
@@ -6745,7 +6751,11 @@ do
 		if not TASRuntime.Reading then
 			TASRuntime.Writing = false
 			TASRuntime.RecordingFPSCapActive = false
+            -- Do not let SaveRecording race the RenderStepped recorder.
+            -- The recorder loop will capture the final frame and clear this flag.
             TASPause.PendingRecordingFlush = true
+            TASRuntime.RecordingStopGeneration = TASRuntime.RecordingStopGeneration + 1
+            TASRuntime.RecordingFlushDeadline = tick() + 2
 		end
 	end
 	TASFunctions.ResetCurrentRecording = function()
@@ -6811,7 +6821,10 @@ do
         return true
     end
 
-    if #TASRuntime.RecordingTable > 0 then
+    -- Always give the recorder a chance to finish its pending final-frame flush.
+    -- Previously this was skipped when RecordingTable happened to be empty at the
+    -- exact moment Save was pressed, which could make a completed recording look empty.
+    if #TASRuntime.RecordingTable > 0 or TASPause.PendingRecordingFlush then
         TASFunctions.SaveRecording()
     end
 
@@ -6883,9 +6896,16 @@ do
 end
 	TASFunctions.SaveRecording = function()
     if TASPause.PendingRecordingFlush then
-        local deadline = tick() + 0.25
+        local deadline = math.max(tick() + 0.5, tonumber(TASRuntime.RecordingFlushDeadline) or 0)
         while TASPause.PendingRecordingFlush and tick() < deadline do
             TASServices.RunService.Heartbeat:Wait()
+        end
+        if TASPause.PendingRecordingFlush then
+            -- The recorder loop did not acknowledge the flush. Do not silently turn
+            -- this into a zero-frame save; keep any already captured frames and expose
+            -- the condition in the console so the failure is diagnosable.
+            TASCharacter.ConsoleMessage("Warning: recording final-frame flush timed out ("..tostring(#TASRuntime.RecordingTable).." frames already captured)")
+            TASPause.PendingRecordingFlush = false
         end
     end
 
@@ -8310,6 +8330,7 @@ spawn(function() -- Writing
 
     while true do
         local deltaTime = TASServices.RunService.RenderStepped:Wait()
+        TASRuntime.RecordingLoopLastTick = tick()
 
         if TASRuntime.Writing then
             -- Cadence follows the TAS recording FPS, not the client FPS cap.
@@ -8349,8 +8370,14 @@ spawn(function() -- Writing
                 local finalFrame = captureFrame()
                 if finalFrame then
                     TASRuntime.RecordingTable[#TASRuntime.RecordingTable + 1] = finalFrame
+                    TASPause.PendingRecordingFlush = false
+                elseif (tonumber(TASRuntime.RecordingFlushDeadline) or 0) > 0 and tick() >= TASRuntime.RecordingFlushDeadline then
+                    -- Character may be temporarily unavailable (respawn/desync).
+                    -- Give it a bounded grace period instead of clearing the request
+                    -- on the first failed capture and producing an empty recording.
+                    TASCharacter.ConsoleMessage("Warning: could not capture final recording frame before timeout")
+                    TASPause.PendingRecordingFlush = false
                 end
-                TASPause.PendingRecordingFlush = false
             end
             TASRuntime.InputBeganQueue = {}
             TASRuntime.InputEndedQueue = {}
