@@ -5765,16 +5765,37 @@ do
 
     addButton(utilitySec, "Rejoin", function()
         TASCharacter.ConsoleMessage("Rejoining...")
-        SaveToFile()
-        while TASRuntime.Saving do TASServices.RunService.Heartbeat:Wait() end
-        SaveTasSettings()
-        task.wait(0.5)
-        if #game.Players:GetPlayers() <= 1 then
-            game.Players.LocalPlayer:Kick("\nRejoining...")
-            task.wait()
-            game:GetService("TeleportService"):Teleport(game.PlaceId, game.Players.LocalPlayer)
-        else
-            game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, game.Players.LocalPlayer)
+
+        if type(_S.ReplayPath) == "string" and _S.ReplayPath ~= "" then
+            pcall(SaveToFile)
+            while TASRuntime.Saving do
+                TASServices.RunService.Heartbeat:Wait()
+            end
+        end
+
+        pcall(SaveTasSettings)
+
+        local TeleportService = game:GetService("TeleportService")
+        local LocalPlayer = game:GetService("Players").LocalPlayer
+        local PlaceId = game.PlaceId
+
+        -- Never Kick() before teleporting. The old code could terminate the
+        -- client before the following Teleport() call executed.
+        local ok, err = pcall(function()
+            TeleportService:Teleport(PlaceId, LocalPlayer)
+        end)
+
+        if not ok then
+            TASCharacter.ConsoleMessage("Rejoin teleport failed: "..tostring(err))
+            local JobId = game.JobId
+            if type(JobId) == "string" and JobId ~= "" then
+                local fallbackOk, fallbackErr = pcall(function()
+                    TeleportService:TeleportToPlaceInstance(PlaceId, JobId, LocalPlayer)
+                end)
+                if not fallbackOk then
+                    TASCharacter.ConsoleMessage("Rejoin fallback failed: "..tostring(fallbackErr))
+                end
+            end
         end
     end)
 
@@ -6233,7 +6254,10 @@ do
     end
 
     GetColorCodeFrame = function()
-        return string.sub(ColorCodeFrame.Text, 9, #ColorCodeFrame.Text)
+        if not ColorCodeFrame then return "None" end
+        local Text = ColorCodeFrame.Text
+        if type(Text) ~= "string" then return "None" end
+        return string.sub(Text, 9, #Text)
     end
 end
 
@@ -8236,12 +8260,19 @@ do
 			return false
 		end
 
-		if string.lower(string.sub(_S.ReplayPath,-5)) ~= ".json" then
+		local ReplayPath = _S.ReplayPath
+		if type(ReplayPath) ~= "string" or ReplayPath == "" then
+			ConsoleMessage("Select or create a .json replay file before saving")
+			return false
+		end
+
+		if string.lower(string.sub(ReplayPath,-5)) ~= ".json" then
 			ConsoleMessage("Only .json replay files can be saved")
 			return false
 		end
 
-		if not _S.ReplayPath or not isfile(_S.ReplayPath) or string.lower(string.sub(_S.ReplayPath,-5)) ~= ".json" then
+		local IsFileOk, FileExists = pcall(isfile, ReplayPath)
+		if not IsFileOk or FileExists ~= true then
 			ConsoleMessage("Select or create a .json replay file before saving")
 			return false
 		end
@@ -8432,8 +8463,8 @@ do
 		if Args == "help" then
 			ConsoleMessage("help <command>: Shows a list of all commands, or a specific command")
 		else
-			local Command = Args[1]
-			if Command then
+			local Command = type(Args) == "table" and Args[1] or nil
+			if type(Command) == "string" and Command ~= "" then
 				Command = string.lower(Command)
 				if Commands[Command] then
 					Commands[Command]("help")
@@ -8469,23 +8500,42 @@ do
 	end
 	Commands["rejoin"] = function(Args)
 		if Args == "help" then
-			ConsoleMessage("rejoin <bool SaveReplay>: Sets one of the configs at the top of the script (PlaybackInputs, etc)")
-		else
-			local SaveReplay = Args[1] and string.lower(Args[1])
-			ConsoleMessage("Saving...")
-			if SaveReplay == "true" or SaveReplay == "yes" or SaveReplay == "1" or SaveReplay == "save" then
-				SaveToFile()
-			end
-			ConsoleMessage("Rejoining...")
-			if #game.Players:GetPlayers() <= 1 then
-				game.Players.LocalPlayer:Kick("\nRejoining...")
-				wait()
-				game:GetService("TeleportService"):Teleport(game.PlaceId, game.Players.LocalPlayer)
-			else
-				game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, game.Players.LocalPlayer)
-			end
-			return "Sent request to rejoin"
+			ConsoleMessage("rejoin <bool SaveReplay>: Rejoins the current Roblox experience")
+			return
 		end
+
+		Args = type(Args) == "table" and Args or {}
+		local SaveArg = Args[1]
+		local SaveReplay = type(SaveArg) == "string" and string.lower(SaveArg) or ""
+
+		if SaveReplay == "true" or SaveReplay == "yes" or SaveReplay == "1" or SaveReplay == "save" then
+			ConsoleMessage("Saving...")
+			pcall(SaveToFile)
+			while TASRuntime.Saving do
+				TASServices.RunService.Heartbeat:Wait()
+			end
+		end
+
+		ConsoleMessage("Rejoining...")
+		local TeleportService = game:GetService("TeleportService")
+		local LocalPlayer = game:GetService("Players").LocalPlayer
+		local PlaceId = game.PlaceId
+		local ok, err = pcall(function()
+			TeleportService:Teleport(PlaceId, LocalPlayer)
+		end)
+		if not ok then
+			ConsoleMessage("Rejoin teleport failed: "..tostring(err))
+			local JobId = game.JobId
+			if type(JobId) == "string" and JobId ~= "" then
+				local fallbackOk, fallbackErr = pcall(function()
+					TeleportService:TeleportToPlaceInstance(PlaceId, JobId, LocalPlayer)
+				end)
+				if not fallbackOk then
+					ConsoleMessage("Rejoin fallback failed: "..tostring(fallbackErr))
+				end
+			end
+		end
+		return ok and "Sent request to rejoin" or "Rejoin request failed"
 	end
 	Commands["invite"] = function(Args)
 		if Args == "help" then
@@ -8688,9 +8738,15 @@ end
 		end
 	end
 	ConsoleInput.Callback = function(self, value)
-		local Input = value
+		local Input = type(value) == "string" and value or tostring(value or "")
+		Input = Input:gsub("^%s+", ""):gsub("%s+$", "")
+		if Input == "" then
+			self:Clear()
+			return
+		end
 		local InputSplit = string.split(Input," ")
-		local Command = Commands[string.lower(InputSplit[1])]
+		local CommandName = InputSplit[1]
+		local Command = CommandName and Commands[string.lower(tostring(CommandName))]
 		if Command then
 			table.remove(InputSplit,1)
 			local ReturnMessage = Command(InputSplit)
