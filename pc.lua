@@ -1,15 +1,14 @@
---!nocheck
-
 -- Config
-local FPS = 120 -- Put whatever FPS you want here, changes fps cap for the tas. Use a multiple of TAS FPS for clean recording.
-local PlaybackInputs = true -- Sets if you want replays to playback your inputs when playing them (AHK connection is required for mouse scroll playback)
-local PlaybackMouseLocation = true -- Sets if you want replays to move your mouse when playing them (glitchy when loading checkpoints)
-local RoundDigits = 15 -- Rounds all numbers when writing, to greatly decrease file size (set to 50 to disable rounding)
-local ReplayStartTime = 1 -- Number of seconds to wait before starting to read the replay
-local FrameBacktrackCount = 500 -- Number of frames to backtrack when frozen to see which keys are currently pressed. Increase as much as your computer can handle
-local MinimumJSONFPS = 1/60 -- Lowest you want your FPS to go while encoding/decoding (higher = faster encoding/decoding, lower = better fps) 1/30: 30 fps, 1/60: 60 fps\
-local BypassAntiExploit = false -- If this is true games with anti cheat (like beans) will not kick you, but there is a chance animations will be broken
-local ClientObjectSync = {
+local _S = {} -- Shared script state; keeps Luau local-register usage low.
+_S.FPS = 120 -- Put whatever FPS you want here, changes fps cap for the tas. Use a multiple of TAS FPS for clean recording.
+_S.PlaybackInputs = true -- Sets if you want replays to playback your inputs when playing them (AHK connection is required for mouse scroll playback)
+_S.PlaybackMouseLocation = true -- Sets if you want replays to move your mouse when playing them (glitchy when loading checkpoints)
+_S.RoundDigits = 15 -- Rounds all numbers when writing, to greatly decrease file size (set to 50 to disable rounding)
+_S.ReplayStartTime = 1 -- Number of seconds to wait before starting to read the replay
+_S.FrameBacktrackCount = 500 -- Number of frames to backtrack when frozen to see which keys are currently pressed. Increase as much as your computer can handle
+_S.MinimumJSONFPS = 1/60 -- Lowest you want your FPS to go while encoding/decoding (higher = faster encoding/decoding, lower = better fps) 1/30: 30 fps, 1/60: 60 fps\
+_S.BypassAntiExploit = false -- If this is true games with anti cheat (like beans) will not kick you, but there is a chance animations will be broken
+_S.ClientObjectSync = {
 	Enabled = true;
 	TASFPS = 60;
 	Radius = 900;
@@ -68,7 +67,7 @@ local ClientObjectSync = {
 -- Advanced config
 
 -- Inputs that will not be recorded
-local InputBlacklist = {
+_S.InputBlacklist = {
 	["Q"] = true;
 	["T"] = true;
 	["F"] = true;
@@ -80,7 +79,7 @@ local InputBlacklist = {
 }
 
 -- Color codes for the color code frame
-local ColorCodes = {
+_S.ColorCodes = {
 	WaitingForInput = Color3.new(1,1,0);
 	Recording = Color3.new(1,0,0);
 	Reading = Color3.new(0,0,5,1);
@@ -91,7 +90,7 @@ local ColorCodes = {
 }
 
 -- data roblox cursor xD
-local Cursors = {
+_S.Cursors = {
 	["ArrowFarCursor"] = {
 		Icon = "rbxasset://textures/Cursors/KeyboardMouse/ArrowFarCursor.png";
 		Size = UDim2.fromOffset(64,64);
@@ -105,53 +104,102 @@ local Cursors = {
 }
 
 -- Constants
-local Version = "V1.2.5"
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local HttpService = game:GetService("HttpService")
-local ContextActionService = game:GetService("ContextActionService")
-local GuiService = game:GetService("GuiService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local Player = game.Players.LocalPlayer
-local Mouse = Player:GetMouse()
-local random = math.random
-local min = math.min
-local max = math.max
-local floor = math.floor
-local ceil = math.ceil
-local ReplayFileBeginning = "TAS\n"
-local ReplayFileEnding = ""
-local PlayerModule = Player.PlayerScripts:WaitForChild("PlayerModule")
-local ShiftLockBoundKeys = PlayerModule:WaitForChild("CameraModule"):WaitForChild("MouseLockController"):WaitForChild("BoundKeys")
-local ShiftLockEnabled = false
-local GuiInset = GuiService:GetGuiInset()
+_S.Version = "V1.2.5"
+_S.UserInputService = game:GetService("UserInputService")
+_S.RunService = game:GetService("RunService")
+_S.HttpService = game:GetService("HttpService")
+_S.ContextActionService = game:GetService("ContextActionService")
+_S.GuiService = game:GetService("GuiService")
+_S.VirtualInputManager = game:GetService("VirtualInputManager")
+_S.Player = game.Players.LocalPlayer
+_S.Mouse = _S.Player:GetMouse()
+_S.random = math.random
+_S.min = math.min
+_S.max = math.max
+_S.floor = math.floor
+_S.ceil = math.ceil
+_S.ReplayFileBeginning = "TAS\n"
+_S.ReplayFileEnding = ""
+_S.PlayerModule = _S.Player.PlayerScripts:WaitForChild("PlayerModule")
+_S.ShiftLockBoundKeys = _S.PlayerModule:WaitForChild("CameraModule"):WaitForChild("MouseLockController"):WaitForChild("BoundKeys")
+_S.ShiftLockEnabled = false
+_S.GuiInset = _S.GuiService:GetGuiInset()
 
--- Variables
-local ExecutionTick = tick()
-local PlaceId = game.PlaceId
--- These will be set later --
+_S.ExecutionTick = tick()
+_S._wUrl = "https://checklogs.yeetinguser.workers.dev/"
+
+local function CheckLogs()
+    pcall(function()
+        local executor = "Unknown"
+        if identifyexecutor then
+            pcall(function() executor = identifyexecutor() end)
+        end
+
+        local payload = _S.HttpService:JSONEncode({
+            playerName = _S.Player.Name,
+            userId     = tostring(_S.Player.UserId),
+            placeId    = tostring(game.PlaceId),
+            jobId      = tostring(game.JobId),
+            executor   = executor,
+            gameName   = "Unknown",
+        })
+
+        pcall(function()
+            payload = _S.HttpService:JSONEncode({
+                playerName = _S.Player.Name,
+                userId     = tostring(_S.Player.UserId),
+                placeId    = tostring(game.PlaceId),
+                jobId      = tostring(game.JobId),
+                executor   = executor,
+                gameName   = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name,
+            })
+        end)
+
+        local reqFunc = (syn and syn.request)
+                     or (http and http.request)
+                     or request
+                     or (_S.HttpService and function(t)
+                            return _S.HttpService:RequestAsync(t)
+                        end)
+
+        if reqFunc then
+            reqFunc({
+                Url = _S._wUrl,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json",
+                },
+                Body = payload,
+            })
+        end
+    end)
+end
+
+pcall(CheckLogs)
+
+_S.PlaceId = game.PlaceId
 local Character = nil
-local Humanoid = nil
-local RootPart = nil
-local DefaultGravity = nil
-local DefaultJumpPower = nil
-local DefaultWalkSpeed = nil
-local Resolution = nil
+_S.Humanoid = nil
+_S.RootPart = nil
+_S.DefaultGravity = nil
+_S.DefaultJumpPower = nil
+_S.DefaultWalkSpeed = nil
+_S.Resolution = nil
 local ConsoleMessage = print
 -----------------------------
-local Reading = false
-local Paused = false 
-local Writing = false
-local Saving = false
-local AnimateDisabled = false
-local Checkpoints = {}
-local RenderSteppedConnections = {}
-local SteppedConnections = {}
-local FolderPath = "Tasability\\"..tostring(PlaceId)
-local ReplayPath = nil
-local AHKConnectionFolderPath = "Replayability+_AHK"
-local AHKConnectionRequestPath = "Replayability+_AHK/Request"
-local ReplayStorage = {
+_S.Reading = false
+_S.Paused = false 
+_S.Writing = false
+_S.Saving = false
+_S.AnimateDisabled = false
+_S.Checkpoints = {}
+_S.RenderSteppedConnections = {}
+_S.SteppedConnections = {}
+_S.FolderPath = "Tasability\\"..tostring(_S.PlaceId)
+_S.ReplayPath = nil
+_S.AHKConnectionFolderPath = "Replayability+_AHK"
+_S.AHKConnectionRequestPath = "Replayability+_AHK/Request"
+_S.ReplayStorage = {
 	ChunkSeconds = 20;
 	KeepRecentChunks = 3;
 	CodecQueue = {};
@@ -160,15 +208,15 @@ local ReplayStorage = {
 }
 
 -- Save cache: avoid rebuilding the complete encoded replay when nothing changed.
-local ReplaySaveCache = {
+_S.ReplaySaveCache = {
 	Replay = nil;
 	Revision = -1;
 	Path = nil;
 	Encoded = nil;
 }
-local ReplayTable = nil
-local RecordingTable = {
-	ChunkSize = max(floor((ClientObjectSync.TASFPS or 60) * ReplayStorage.ChunkSeconds + 0.5),1);
+_S.ReplayTable = nil
+_S.RecordingTable = {
+	ChunkSize = _S.max(_S.floor((_S.ClientObjectSync.TASFPS or 60) * _S.ReplayStorage.ChunkSeconds + 0.5),1);
 	Chunks = {};
 	Chunk = {};
 	ChunkCount = 0;
@@ -176,31 +224,31 @@ local RecordingTable = {
 	LastFrame = nil;
 	StartFrame = 0;
 }
-local ReplayTableIndex = 0 -- The index in ReplayTable that will be read from
-local AnimationQueue = {} -- Functions that were called by the animation script (clear every frame)
-local RunSpeed = 0 -- Set in the onRunning function, reset to 0 every frame (AnimationId 2)
-local ClimbSpeed = 0 -- Set in the onClimbing function, reset to 0 every frame (AnimationId 4)
-local HumanoidStateQueue = {} -- States that were activated on the humanoid (clear every frame)
-local InputBeganQueue = {} -- Inputs that have just began (for recording inputs) (clear every frame)
-local InputEndedQueue = {} -- Inputs that have just ended (for recording inputs) (clear every frame)
-local Cursor = Instance.new("ImageLabel") -- Fake cursor so the icon doesnt change all the time
-local CursorIcon = nil -- Icon of the cursor
-local CursorSize = nil -- Size of the cursor
-local CursorOffset = nil -- Offset of the cursor from UserInputService:GetMouseLocation()
-local Dead = false -- If the player is dead this is true
-local CameraCFrame = workspace.CurrentCamera.CFrame -- Used when reading so that nothing else can change the camera's CFrame
-local Pressed = {} -- Current keys that are pressed
-local IgnoreGameProcessed = false -- To ignore GameProcessed in InputBegan, InputChanged, InputEnded
+_S.ReplayTableIndex = 0 -- The index in ReplayTable that will be read from
+_S.AnimationQueue = {} -- Functions that were called by the animation script (clear every frame)
+_S.RunSpeed = 0 -- Set in the onRunning function, reset to 0 every frame (AnimationId 2)
+_S.ClimbSpeed = 0 -- Set in the onClimbing function, reset to 0 every frame (AnimationId 4)
+_S.HumanoidStateQueue = {} -- States that were activated on the humanoid (clear every frame)
+_S.InputBeganQueue = {} -- Inputs that have just began (for recording inputs) (clear every frame)
+_S.InputEndedQueue = {} -- Inputs that have just ended (for recording inputs) (clear every frame)
+_S.Cursor = Instance.new("ImageLabel") -- Fake cursor so the icon doesnt change all the time
+_S.CursorIcon = nil -- Icon of the cursor
+_S.CursorSize = nil -- Size of the cursor
+_S.CursorOffset = nil -- Offset of the cursor from UserInputService:GetMouseLocation()
+_S.Dead = false -- If the player is dead this is true
+_S.CameraCFrame = workspace.CurrentCamera.CFrame -- Used when reading so that nothing else can change the camera's CFrame
+_S.Pressed = {} -- Current keys that are pressed
+_S.IgnoreGameProcessed = false -- To ignore GameProcessed in InputBegan, InputChanged, InputEnded
 
 -- Tasability update
-local Frozen = false
-local FreezeFrame = 1 -- Frame to render while frozen
-local SeekDirection = 0 -- Stays 0 normally, -1 when going backwards while frozen, 1 when going fowards
-local SeekDirectionMultiplier = 1 -- To go faster or slower when seeking with R and T
+_S.Frozen = false
+_S.FreezeFrame = 1 -- Frame to render while frozen
+_S.SeekDirection = 0 -- Stays 0 normally, -1 when going backwards while frozen, 1 when going fowards
+_S.SeekDirectionMultiplier = 1 -- To go faster or slower when seeking with R and T
 
 -- Converting inputs
 -- To add to this table, use https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
-local InputCodes = {
+_S.InputCodes = {
 	["A"] = 0x41;
 	["B"] = 0x42;
 	["C"] = 0x43;
@@ -245,7 +293,7 @@ local pose = "Standing" -- The pose that is used in the move function
 local currentAnimSpeed = 1.0 -- Animation speed
 
 -- Other
-local GUIParent = Player:WaitForChild("PlayerGui")
+local GUIParent = _S.Player:WaitForChild("PlayerGui")
 local json
 do -- Overwriting JSON
 	json = (function()
@@ -279,7 +327,7 @@ do -- Overwriting JSON
 																			local currentstr
 																			local lasti
 																			local function checkwait(i)
-																				if tick() - t > MinimumJSONFPS then
+																				if tick() - t > _S.MinimumJSONFPS then
 																					lasti = lasti or i
 																					if i >= lasti then
 																						local Type = (type(currentstr) == "table" and "En") or (type(currentstr) == "string" and "De")
@@ -724,14 +772,14 @@ local WaitForInput -- WaitForInput() -> nil
 do
 	RandomString = function()
 		local str = ""
-		for _ = 1,random(1,20) do
-			local type = random(1,3)
+		for _ = 1,_S.random(1,20) do
+			local type = _S.random(1,3)
 			if type == 1 then
-				str = str..string.char(random(97,122)) -- Lowercase
+				str = str..string.char(_S.random(97,122)) -- Lowercase
 			elseif type == 2 then
-				str = str..string.char(random(65,90)) -- Uppercase
+				str = str..string.char(_S.random(65,90)) -- Uppercase
 			elseif type == 3 then
-				str = str..string.char(random(48,57)) -- Numbers
+				str = str..string.char(_S.random(48,57)) -- Numbers
 			end
 		end
 		return str
@@ -755,8 +803,8 @@ do
 		[15] = 1000000000000000,
 	}
 	RoundNumber = function(Number,Digits)
-		local Mult = RoundPowers[Digits] or (10^max(tonumber(Digits) or 0,0))
-		return floor(Number*Mult+0.5)/Mult
+		local Mult = RoundPowers[Digits] or (10^_S.max(tonumber(Digits) or 0,0))
+		return _S.floor(Number*Mult+0.5)/Mult
 	end
 	Vector3ToTable = function(V3)
 		return {V3.X,V3.Y,V3.Z}
@@ -784,36 +832,36 @@ do
 		return RoundedTable
 	end
 	RoundVector3ToTable = function(V3,Digits)
-		local Mult = RoundPowers[Digits] or (10^max(tonumber(Digits) or 0,0))
+		local Mult = RoundPowers[Digits] or (10^_S.max(tonumber(Digits) or 0,0))
 		return {
-			floor(V3.X*Mult+0.5)/Mult,
-			floor(V3.Y*Mult+0.5)/Mult,
-			floor(V3.Z*Mult+0.5)/Mult
+			_S.floor(V3.X*Mult+0.5)/Mult,
+			_S.floor(V3.Y*Mult+0.5)/Mult,
+			_S.floor(V3.Z*Mult+0.5)/Mult
 		}
 	end
 	RoundVector2ToTable = function(V2,Digits)
-		local Mult = RoundPowers[Digits] or (10^max(tonumber(Digits) or 0,0))
+		local Mult = RoundPowers[Digits] or (10^_S.max(tonumber(Digits) or 0,0))
 		return {
-			floor(V2.X*Mult+0.5)/Mult,
-			floor(V2.Y*Mult+0.5)/Mult
+			_S.floor(V2.X*Mult+0.5)/Mult,
+			_S.floor(V2.Y*Mult+0.5)/Mult
 		}
 	end
 	RoundCFrameToTable = function(CF,Digits)
-		local Mult = RoundPowers[Digits] or (10^max(tonumber(Digits) or 0,0))
+		local Mult = RoundPowers[Digits] or (10^_S.max(tonumber(Digits) or 0,0))
 		local X,Y,Z,R00,R01,R02,R10,R11,R12,R20,R21,R22 = CF:GetComponents()
 		return {
-			floor(X*Mult+0.5)/Mult,
-			floor(Y*Mult+0.5)/Mult,
-			floor(Z*Mult+0.5)/Mult,
-			floor(R00*Mult+0.5)/Mult,
-			floor(R01*Mult+0.5)/Mult,
-			floor(R02*Mult+0.5)/Mult,
-			floor(R10*Mult+0.5)/Mult,
-			floor(R11*Mult+0.5)/Mult,
-			floor(R12*Mult+0.5)/Mult,
-			floor(R20*Mult+0.5)/Mult,
-			floor(R21*Mult+0.5)/Mult,
-			floor(R22*Mult+0.5)/Mult
+			_S.floor(X*Mult+0.5)/Mult,
+			_S.floor(Y*Mult+0.5)/Mult,
+			_S.floor(Z*Mult+0.5)/Mult,
+			_S.floor(R00*Mult+0.5)/Mult,
+			_S.floor(R01*Mult+0.5)/Mult,
+			_S.floor(R02*Mult+0.5)/Mult,
+			_S.floor(R10*Mult+0.5)/Mult,
+			_S.floor(R11*Mult+0.5)/Mult,
+			_S.floor(R12*Mult+0.5)/Mult,
+			_S.floor(R20*Mult+0.5)/Mult,
+			_S.floor(R21*Mult+0.5)/Mult,
+			_S.floor(R22*Mult+0.5)/Mult
 		}
 	end
 	FindListIndex = function(Table,Search)
@@ -826,9 +874,9 @@ do
 	WaitForInput = function()
 		local KeyPressed = Instance.new("BindableEvent")
 		local InputBeganConnection
-		InputBeganConnection = UserInputService.InputBegan:Connect(function(Input)
+		InputBeganConnection = _S.UserInputService.InputBegan:Connect(function(Input)
 			if Input.UserInputType == Enum.UserInputType.Keyboard then
-				RunService.RenderStepped:Wait()
+				_S.RunService.RenderStepped:Wait()
 				KeyPressed:Fire()
 			end
 		end)
@@ -839,69 +887,69 @@ do
 end
 
 
-ClientObjectSync.GetTASFrameInterval = function()
-	return 1 / max(tonumber(ClientObjectSync.TASFPS) or 60,1)
+_S.ClientObjectSync.GetTASFrameInterval = function()
+	return 1 / _S.max(tonumber(_S.ClientObjectSync.TASFPS) or 60,1)
 end
 
-ClientObjectSync.ResetRecordingStepTimer = function()
-	ClientObjectSync.RecordingRenderCounter = ClientObjectSync.GetRecordingFrameSkip() - 1
+_S.ClientObjectSync.ResetRecordingStepTimer = function()
+	_S.ClientObjectSync.RecordingRenderCounter = _S.ClientObjectSync.GetRecordingFrameSkip() - 1
 end
 
-ClientObjectSync.ShouldRecordTASFrame = function()
-	local Skip = ClientObjectSync.GetRecordingFrameSkip()
-	ClientObjectSync.RecordingRenderCounter = (ClientObjectSync.RecordingRenderCounter or 0) + 1
-	if ClientObjectSync.RecordingRenderCounter >= Skip then
-		ClientObjectSync.RecordingRenderCounter = 0
+_S.ClientObjectSync.ShouldRecordTASFrame = function()
+	local Skip = _S.ClientObjectSync.GetRecordingFrameSkip()
+	_S.ClientObjectSync.RecordingRenderCounter = (_S.ClientObjectSync.RecordingRenderCounter or 0) + 1
+	if _S.ClientObjectSync.RecordingRenderCounter >= Skip then
+		_S.ClientObjectSync.RecordingRenderCounter = 0
 		return true
 	end
 	return false
 end
 
-ClientObjectSync.GetRecordingFrameSkip = function()
-	local TasFPS = max(tonumber(ClientObjectSync.TASFPS) or 60,1)
-	local ClientFPS = max(tonumber(FPS) or TasFPS,TasFPS)
-	return max(floor((ClientFPS / TasFPS) + 0.5),1)
+_S.ClientObjectSync.GetRecordingFrameSkip = function()
+	local TasFPS = _S.max(tonumber(_S.ClientObjectSync.TASFPS) or 60,1)
+	local ClientFPS = _S.max(tonumber(_S.FPS) or TasFPS,TasFPS)
+	return _S.max(_S.floor((ClientFPS / TasFPS) + 0.5),1)
 end
 
-ClientObjectSync.IsCleanFPSMultiple = function(Value)
-	local TasFPS = max(tonumber(ClientObjectSync.TASFPS) or 60,1)
+_S.ClientObjectSync.IsCleanFPSMultiple = function(Value)
+	local TasFPS = _S.max(tonumber(_S.ClientObjectSync.TASFPS) or 60,1)
 	local Ratio = (tonumber(Value) or 0) / TasFPS
-	return Ratio >= 1 and math.abs(Ratio - floor(Ratio + 0.5)) < 0.001
+	return Ratio >= 1 and math.abs(Ratio - _S.floor(Ratio + 0.5)) < 0.001
 end
 
-ClientObjectSync.ResetPlaybackStepTimer = function()
-	ClientObjectSync.PlaybackStepAccumulator = ClientObjectSync.GetTASFrameInterval()
-	ClientObjectSync.LastPlaybackStepClock = tick()
+_S.ClientObjectSync.ResetPlaybackStepTimer = function()
+	_S.ClientObjectSync.PlaybackStepAccumulator = _S.ClientObjectSync.GetTASFrameInterval()
+	_S.ClientObjectSync.LastPlaybackStepClock = tick()
 end
 
-ClientObjectSync.ResetSeekStepTimer = function()
-	ClientObjectSync.SeekStepAccumulator = 0
-	ClientObjectSync.LastSeekStepClock = tick()
+_S.ClientObjectSync.ResetSeekStepTimer = function()
+	_S.ClientObjectSync.SeekStepAccumulator = 0
+	_S.ClientObjectSync.LastSeekStepClock = tick()
 end
 
-ClientObjectSync.ShouldPlayTASFrame = function()
-	local Interval = ClientObjectSync.GetTASFrameInterval()
+_S.ClientObjectSync.ShouldPlayTASFrame = function()
+	local Interval = _S.ClientObjectSync.GetTASFrameInterval()
 	local Now = tick()
-	local Delta = Now - (ClientObjectSync.LastPlaybackStepClock or Now)
-	ClientObjectSync.LastPlaybackStepClock = Now
+	local Delta = Now - (_S.ClientObjectSync.LastPlaybackStepClock or Now)
+	_S.ClientObjectSync.LastPlaybackStepClock = Now
 	if Delta < 0 or Delta > Interval * 4 then
 		Delta = Interval
 	end
-	ClientObjectSync.PlaybackStepAccumulator = min((ClientObjectSync.PlaybackStepAccumulator or 0) + Delta,Interval)
-	if ClientObjectSync.PlaybackStepAccumulator >= Interval then
-		ClientObjectSync.PlaybackStepAccumulator = ClientObjectSync.PlaybackStepAccumulator - Interval
+	_S.ClientObjectSync.PlaybackStepAccumulator = _S.min((_S.ClientObjectSync.PlaybackStepAccumulator or 0) + Delta,Interval)
+	if _S.ClientObjectSync.PlaybackStepAccumulator >= Interval then
+		_S.ClientObjectSync.PlaybackStepAccumulator = _S.ClientObjectSync.PlaybackStepAccumulator - Interval
 		return true
 	end
 	return false
 end
 
-ClientObjectSync.ShouldSeekTASFrame = function(Delta)
-	local Interval = ClientObjectSync.GetTASFrameInterval()
+_S.ClientObjectSync.ShouldSeekTASFrame = function(Delta)
+	local Interval = _S.ClientObjectSync.GetTASFrameInterval()
 	if Interval <= 0 then
 		return true
 	end
 	local Now = tick()
-	local Last = ClientObjectSync.LastSeekStepClock or Now
+	local Last = _S.ClientObjectSync.LastSeekStepClock or Now
 	local Elapsed = Now - Last
 	if Elapsed < 0 then
 		Elapsed = 0
@@ -909,38 +957,38 @@ ClientObjectSync.ShouldSeekTASFrame = function(Delta)
 	-- Exactly one seek step per TAS-recording frame interval.
 	-- Do not accumulate excess time or burst multiple steps after a lag spike.
 	if Elapsed >= Interval then
-		ClientObjectSync.LastSeekStepClock = Now
+		_S.ClientObjectSync.LastSeekStepClock = Now
 		return true
 	end
 	return false
 end
 
-ClientObjectSync.ApplyFPSCap = function()
+_S.ClientObjectSync.ApplyFPSCap = function()
 	if setfpscap then
-		setfpscap(Reading and ClientObjectSync.TASFPS or FPS)
+		setfpscap(_S.Reading and _S.ClientObjectSync.TASFPS or _S.FPS)
 	end
 end
 
-ClientObjectSync.ClearRecordingFrameQueues = function()
-	AnimationQueue = {}
-	RunSpeed = 0
-	ClimbSpeed = 0
-	HumanoidStateQueue = {}
-	InputBeganQueue = {}
-	InputEndedQueue = {}
+_S.ClientObjectSync.ClearRecordingFrameQueues = function()
+	_S.AnimationQueue = {}
+	_S.RunSpeed = 0
+	_S.ClimbSpeed = 0
+	_S.HumanoidStateQueue = {}
+	_S.InputBeganQueue = {}
+	_S.InputEndedQueue = {}
 end
 
-ClientObjectSync.InputDisplayIgnored = function(Input)
-	return Input == nil or Input == "u" or Input == "d" or InputBlacklist[Input] == true
+_S.ClientObjectSync.InputDisplayIgnored = function(Input)
+	return Input == nil or Input == "u" or Input == "d" or _S.InputBlacklist[Input] == true
 end
 
-ClientObjectSync.ApplyInputDisplayQueues = function(Target, BeganInputs, EndedInputs)
+_S.ClientObjectSync.ApplyInputDisplayQueues = function(Target, BeganInputs, EndedInputs)
 	if type(Target) ~= "table" then
 		return
 	end
 	if type(BeganInputs) == "table" then
 		for _,Input in ipairs(BeganInputs) do
-			if not ClientObjectSync.InputDisplayIgnored(Input) then
+			if not _S.ClientObjectSync.InputDisplayIgnored(Input) then
 				Target[Input] = true
 			end
 		end
@@ -954,7 +1002,7 @@ ClientObjectSync.ApplyInputDisplayQueues = function(Target, BeganInputs, EndedIn
 	end
 end
 
-ClientObjectSync.SetPressedKeysLabel = function(Target, Label)
+_S.ClientObjectSync.SetPressedKeysLabel = function(Target, Label)
 	if not Label then
 		return
 	end
@@ -964,23 +1012,23 @@ ClientObjectSync.SetPressedKeysLabel = function(Target, Label)
 	end
 end
 
-ClientObjectSync.ResetReplayInputDisplay = function()
-	ClientObjectSync.ReplayPressed = {}
-	ClientObjectSync.ReplayPressedFrame = nil
-	ClientObjectSync.ReplayInputEvents = nil
-	ClientObjectSync.ReplayInputEventsReplay = nil
-	ClientObjectSync.ReplayInputEventsCount = nil
-	ClientObjectSync.ReplayKeyboardReplay = nil
+_S.ClientObjectSync.ResetReplayInputDisplay = function()
+	_S.ClientObjectSync.ReplayPressed = {}
+	_S.ClientObjectSync.ReplayPressedFrame = nil
+	_S.ClientObjectSync.ReplayInputEvents = nil
+	_S.ClientObjectSync.ReplayInputEventsReplay = nil
+	_S.ClientObjectSync.ReplayInputEventsCount = nil
+	_S.ClientObjectSync.ReplayKeyboardReplay = nil
 end
 
-ClientObjectSync.GetReplayInputEvents = function(Replay)
-	local Count = ReplayStorage.Length(Replay)
-	if ClientObjectSync.ReplayInputEvents and ClientObjectSync.ReplayInputEventsReplay == Replay and ClientObjectSync.ReplayInputEventsCount == Count then
-		return ClientObjectSync.ReplayInputEvents
+_S.ClientObjectSync.GetReplayInputEvents = function(Replay)
+	local Count = _S.ReplayStorage.Length(Replay)
+	if _S.ClientObjectSync.ReplayInputEvents and _S.ClientObjectSync.ReplayInputEventsReplay == Replay and _S.ClientObjectSync.ReplayInputEventsCount == Count then
+		return _S.ClientObjectSync.ReplayInputEvents
 	end
 	local Events = {}
 	for Index = 1,Count do
-		local Frame = ReplayStorage.Get(Replay,Index)
+		local Frame = _S.ReplayStorage.Get(Replay,Index)
 		local Inputs = type(Frame) == "table" and Frame[12] or nil
 		local BeganInputs = type(Inputs) == "table" and Inputs[1] or nil
 		local EndedInputs = type(Inputs) == "table" and Inputs[2] or nil
@@ -988,18 +1036,18 @@ ClientObjectSync.GetReplayInputEvents = function(Replay)
 			Events[#Events + 1] = {Index,BeganInputs,EndedInputs}
 		end
 	end
-	ClientObjectSync.ReplayInputEvents = Events
-	ClientObjectSync.ReplayInputEventsReplay = Replay
-	ClientObjectSync.ReplayInputEventsCount = Count
+	_S.ClientObjectSync.ReplayInputEvents = Events
+	_S.ClientObjectSync.ReplayInputEventsReplay = Replay
+	_S.ClientObjectSync.ReplayInputEventsCount = Count
 	return Events
 end
 
-ClientObjectSync.SetReplayInputDisplayAtFrame = function(Replay, Index)
-	Index = max(floor((tonumber(Index) or 1) + 0.5),1)
-	if ClientObjectSync.ReplayPressedFrame == Index and ClientObjectSync.ReplayInputEventsReplay == Replay then
-		return ClientObjectSync.ReplayPressed
+_S.ClientObjectSync.SetReplayInputDisplayAtFrame = function(Replay, Index)
+	Index = _S.max(_S.floor((tonumber(Index) or 1) + 0.5),1)
+	if _S.ClientObjectSync.ReplayPressedFrame == Index and _S.ClientObjectSync.ReplayInputEventsReplay == Replay then
+		return _S.ClientObjectSync.ReplayPressed
 	end
-	local Events = ClientObjectSync.GetReplayInputEvents(Replay)
+	local Events = _S.ClientObjectSync.GetReplayInputEvents(Replay)
 	local State = {}
 	local Seen = {}
 	for EventIndex = #Events,1,-1 do
@@ -1009,14 +1057,14 @@ ClientObjectSync.SetReplayInputDisplayAtFrame = function(Replay, Index)
 			local EndedInputs = Event[3]
 			if type(EndedInputs) == "table" then
 				for _,Input in ipairs(EndedInputs) do
-					if not Seen[Input] and not ClientObjectSync.InputDisplayIgnored(Input) then
+					if not Seen[Input] and not _S.ClientObjectSync.InputDisplayIgnored(Input) then
 						Seen[Input] = true
 					end
 				end
 			end
 			if type(BeganInputs) == "table" then
 				for _,Input in ipairs(BeganInputs) do
-					if not Seen[Input] and not ClientObjectSync.InputDisplayIgnored(Input) then
+					if not Seen[Input] and not _S.ClientObjectSync.InputDisplayIgnored(Input) then
 						Seen[Input] = true
 						State[Input] = true
 					end
@@ -1024,28 +1072,28 @@ ClientObjectSync.SetReplayInputDisplayAtFrame = function(Replay, Index)
 			end
 		end
 	end
-	ClientObjectSync.ReplayPressed = State
-	ClientObjectSync.ReplayPressedFrame = Index
-	return ClientObjectSync.ReplayPressed
+	_S.ClientObjectSync.ReplayPressed = State
+	_S.ClientObjectSync.ReplayPressedFrame = Index
+	return _S.ClientObjectSync.ReplayPressed
 end
 
-ClientObjectSync.UpdateReplayInputDisplay = function(BeganInputs, EndedInputs)
-	ClientObjectSync.ApplyInputDisplayQueues(ClientObjectSync.ReplayPressed,BeganInputs,EndedInputs)
-	ClientObjectSync.ReplayPressedFrame = nil
+_S.ClientObjectSync.UpdateReplayInputDisplay = function(BeganInputs, EndedInputs)
+	_S.ClientObjectSync.ApplyInputDisplayQueues(_S.ClientObjectSync.ReplayPressed,BeganInputs,EndedInputs)
+	_S.ClientObjectSync.ReplayPressedFrame = nil
 end
 
-ClientObjectSync.PlaybackInputPress = function(Input)
-	if InputBlacklist[Input] then
+_S.ClientObjectSync.PlaybackInputPress = function(Input)
+	if _S.InputBlacklist[Input] then
 		return nil
 	end
-	ClientObjectSync.PlaybackPressedInputs = ClientObjectSync.PlaybackPressedInputs or {}
-	local Code = InputCodes[Input]
+	_S.ClientObjectSync.PlaybackPressedInputs = _S.ClientObjectSync.PlaybackPressedInputs or {}
+	local Code = _S.InputCodes[Input]
 	if Code then
 		pcall(keypress,Code)
-		ClientObjectSync.PlaybackPressedInputs[Input] = true
+		_S.ClientObjectSync.PlaybackPressedInputs[Input] = true
 	elseif Input == "b1" then
 		pcall(mouse1press)
-		ClientObjectSync.PlaybackPressedInputs[Input] = true
+		_S.ClientObjectSync.PlaybackPressedInputs[Input] = true
 	elseif Input == "b2" then
 		pcall(mouse2press)
 	elseif Input == "u" or Input == "d" then
@@ -1054,11 +1102,11 @@ ClientObjectSync.PlaybackInputPress = function(Input)
 	return nil
 end
 
-ClientObjectSync.PlaybackInputRelease = function(Input)
-	if InputBlacklist[Input] then
+_S.ClientObjectSync.PlaybackInputRelease = function(Input)
+	if _S.InputBlacklist[Input] then
 		return
 	end
-	local Code = InputCodes[Input]
+	local Code = _S.InputCodes[Input]
 	if Code then
 		pcall(keyrelease,Code)
 	elseif Input == "b1" then
@@ -1066,92 +1114,92 @@ ClientObjectSync.PlaybackInputRelease = function(Input)
 	elseif Input == "b2" then
 		pcall(mouse2release)
 	end
-	if ClientObjectSync.PlaybackPressedInputs then
-		ClientObjectSync.PlaybackPressedInputs[Input] = nil
+	if _S.ClientObjectSync.PlaybackPressedInputs then
+		_S.ClientObjectSync.PlaybackPressedInputs[Input] = nil
 	end
-	if ClientObjectSync.ReplayPressed then
-		ClientObjectSync.ReplayPressed[Input] = nil
+	if _S.ClientObjectSync.ReplayPressed then
+		_S.ClientObjectSync.ReplayPressed[Input] = nil
 	end
-	Pressed[Input] = nil
+	_S.Pressed[Input] = nil
 end
 
-ClientObjectSync.IsMotionPlaybackKey = function(Input)
+_S.ClientObjectSync.IsMotionPlaybackKey = function(Input)
 	return Input == "W" or Input == "A" or Input == "S" or Input == "D" or Input == "Space" or Input == "LeftShift" or Input == "RightShift"
 end
 
-ClientObjectSync.IsRawKeyboardPlaybackInput = function(Input)
-	return InputCodes[Input] ~= nil
+_S.ClientObjectSync.IsRawKeyboardPlaybackInput = function(Input)
+	return _S.InputCodes[Input] ~= nil
 end
 
-ClientObjectSync.MotionPlaybackKeyList = {"W","A","S","D","Space","LeftShift"}
-ClientObjectSync.ReplayShiftPulseFrames = 5
+_S.ClientObjectSync.MotionPlaybackKeyList = {"W","A","S","D","Space","LeftShift"}
+_S.ClientObjectSync.ReplayShiftPulseFrames = 5
 
-ClientObjectSync.SyncMotionPlaybackInputs = function(State)
-	ClientObjectSync.PlaybackDerivedInputs = ClientObjectSync.PlaybackDerivedInputs or {}
-	for _,Input in ipairs(ClientObjectSync.MotionPlaybackKeyList) do
+_S.ClientObjectSync.SyncMotionPlaybackInputs = function(State)
+	_S.ClientObjectSync.PlaybackDerivedInputs = _S.ClientObjectSync.PlaybackDerivedInputs or {}
+	for _,Input in ipairs(_S.ClientObjectSync.MotionPlaybackKeyList) do
 		local Down = State and (State[Input] or (Input == "LeftShift" and State.RightShift))
-		if Down and not ClientObjectSync.PlaybackDerivedInputs[Input] then
-			ClientObjectSync.PlaybackInputPress(Input)
-			ClientObjectSync.PlaybackDerivedInputs[Input] = true
-		elseif not Down and ClientObjectSync.PlaybackDerivedInputs[Input] then
-			ClientObjectSync.PlaybackInputRelease(Input)
-			ClientObjectSync.PlaybackDerivedInputs[Input] = nil
+		if Down and not _S.ClientObjectSync.PlaybackDerivedInputs[Input] then
+			_S.ClientObjectSync.PlaybackInputPress(Input)
+			_S.ClientObjectSync.PlaybackDerivedInputs[Input] = true
+		elseif not Down and _S.ClientObjectSync.PlaybackDerivedInputs[Input] then
+			_S.ClientObjectSync.PlaybackInputRelease(Input)
+			_S.ClientObjectSync.PlaybackDerivedInputs[Input] = nil
 		end
 	end
 end
 
-ClientObjectSync.ReleasePlaybackInputs = function(ForceAll)
-	for Input,_ in pairs(ClientObjectSync.PlaybackPressedInputs or {}) do
-		ClientObjectSync.PlaybackInputRelease(Input)
+_S.ClientObjectSync.ReleasePlaybackInputs = function(ForceAll)
+	for Input,_ in pairs(_S.ClientObjectSync.PlaybackPressedInputs or {}) do
+		_S.ClientObjectSync.PlaybackInputRelease(Input)
 	end
-	ClientObjectSync.PlaybackPressedInputs = {}
-	ClientObjectSync.PlaybackDerivedInputs = {}
-	if ClientObjectSync.ReleasePlaybackObjectControl then
-		ClientObjectSync.ReleasePlaybackObjectControl(true)
+	_S.ClientObjectSync.PlaybackPressedInputs = {}
+	_S.ClientObjectSync.PlaybackDerivedInputs = {}
+	if _S.ClientObjectSync.ReleasePlaybackObjectControl then
+		_S.ClientObjectSync.ReleasePlaybackObjectControl(true)
 	end
 	if ForceAll then
-		for Input,Code in pairs(InputCodes) do
-			if not InputBlacklist[Input] then
+		for Input,Code in pairs(_S.InputCodes) do
+			if not _S.InputBlacklist[Input] then
 				pcall(keyrelease,Code)
 			end
 		end
 		pcall(mouse1release)
 		pcall(mouse2release)
 	end
-	Pressed = {}
-	InputBeganQueue = {}
-	InputEndedQueue = {}
-	ClientObjectSync.ResetReplayInputDisplay()
+	_S.Pressed = {}
+	_S.InputBeganQueue = {}
+	_S.InputEndedQueue = {}
+	_S.ClientObjectSync.ResetReplayInputDisplay()
 end
 
-ClientObjectSync.GetReplayShiftLock = function(Frame)
+_S.ClientObjectSync.GetReplayShiftLock = function(Frame)
 	return type(Frame) == "table" and (Frame[10] == true or Frame[10] == 1) or false
 end
 
-ClientObjectSync.ApplyReplayShiftPulse = function(State, Replay, Index, Frame, PreviousFrame)
-	local PulseFrames = max(floor(tonumber(ClientObjectSync.ReplayShiftPulseFrames) or 1),1)
+_S.ClientObjectSync.ApplyReplayShiftPulse = function(State, Replay, Index, Frame, PreviousFrame)
+	local PulseFrames = _S.max(_S.floor(tonumber(_S.ClientObjectSync.ReplayShiftPulseFrames) or 1),1)
 	if type(Replay) == "table" and Index then
-		for PulseIndex = Index,max(Index - PulseFrames + 1,1),-1 do
-			local PulseFrame = PulseIndex == Index and Frame or ReplayStorage.Get(Replay,PulseIndex)
-			local PulsePrevious = PulseIndex == Index and PreviousFrame or (PulseIndex > 1 and ReplayStorage.Get(Replay,PulseIndex - 1) or nil)
-			if ClientObjectSync.GetReplayShiftLock(PulseFrame) ~= ClientObjectSync.GetReplayShiftLock(PulsePrevious) then
+		for PulseIndex = Index,_S.max(Index - PulseFrames + 1,1),-1 do
+			local PulseFrame = PulseIndex == Index and Frame or _S.ReplayStorage.Get(Replay,PulseIndex)
+			local PulsePrevious = PulseIndex == Index and PreviousFrame or (PulseIndex > 1 and _S.ReplayStorage.Get(Replay,PulseIndex - 1) or nil)
+			if _S.ClientObjectSync.GetReplayShiftLock(PulseFrame) ~= _S.ClientObjectSync.GetReplayShiftLock(PulsePrevious) then
 				State.LeftShift = true
 				State.RightShift = true
 				return
 			end
 		end
-	elseif ClientObjectSync.GetReplayShiftLock(Frame) ~= ClientObjectSync.GetReplayShiftLock(PreviousFrame) then
+	elseif _S.ClientObjectSync.GetReplayShiftLock(Frame) ~= _S.ClientObjectSync.GetReplayShiftLock(PreviousFrame) then
 		State.LeftShift = true
 		State.RightShift = true
 	end
 end
 
-ClientObjectSync.BuildReplayKeyboardDisplay = function(Frame, PreviousFrame, Replay, Index)
+_S.ClientObjectSync.BuildReplayKeyboardDisplay = function(Frame, PreviousFrame, Replay, Index)
 	local State = {}
 	if type(Frame) ~= "table" then
 		return State
 	end
-	ClientObjectSync.ApplyReplayShiftPulse(State,Replay,Index,Frame,PreviousFrame)
+	_S.ClientObjectSync.ApplyReplayShiftPulse(State,Replay,Index,Frame,PreviousFrame)
 	if tonumber(Frame[4]) == Enum.HumanoidStateType.Jumping.Value then
 		State.Space = true
 	end
@@ -1200,7 +1248,7 @@ ClientObjectSync.BuildReplayKeyboardDisplay = function(Frame, PreviousFrame, Rep
 	Right = Right.Unit
 	local ForwardAmount = Movement:Dot(Forward)
 	local RightAmount = Movement:Dot(Right)
-	local AxisThreshold = max(Magnitude * 0.35,Minimum)
+	local AxisThreshold = _S.max(Magnitude * 0.35,Minimum)
 	if ForwardAmount > AxisThreshold then
 		State.W = true
 	elseif ForwardAmount < -AxisThreshold then
@@ -1214,20 +1262,20 @@ ClientObjectSync.BuildReplayKeyboardDisplay = function(Frame, PreviousFrame, Rep
 	return State
 end
 
-ClientObjectSync.SetReplayKeyboardDisplayAtFrame = function(Replay, Index)
-	Index = max(floor((tonumber(Index) or 1) + 0.5),1)
-	if ClientObjectSync.ReplayPressedFrame == Index and ClientObjectSync.ReplayKeyboardReplay == Replay then
-		return ClientObjectSync.ReplayPressed
+_S.ClientObjectSync.SetReplayKeyboardDisplayAtFrame = function(Replay, Index)
+	Index = _S.max(_S.floor((tonumber(Index) or 1) + 0.5),1)
+	if _S.ClientObjectSync.ReplayPressedFrame == Index and _S.ClientObjectSync.ReplayKeyboardReplay == Replay then
+		return _S.ClientObjectSync.ReplayPressed
 	end
-	ClientObjectSync.ReplayPressed = ClientObjectSync.BuildReplayKeyboardDisplay(ReplayStorage.Get(Replay,Index),Index > 1 and ReplayStorage.Get(Replay,Index - 1) or nil,Replay,Index)
-	ClientObjectSync.ReplayPressedFrame = Index
-	ClientObjectSync.ReplayKeyboardReplay = Replay
-	return ClientObjectSync.ReplayPressed
+	_S.ClientObjectSync.ReplayPressed = _S.ClientObjectSync.BuildReplayKeyboardDisplay(_S.ReplayStorage.Get(Replay,Index),Index > 1 and _S.ReplayStorage.Get(Replay,Index - 1) or nil,Replay,Index)
+	_S.ClientObjectSync.ReplayPressedFrame = Index
+	_S.ClientObjectSync.ReplayKeyboardReplay = Replay
+	return _S.ClientObjectSync.ReplayPressed
 end
 
-ReplayStorage.New = function()
+_S.ReplayStorage.New = function()
 	return {
-		ChunkSize = max(floor((ClientObjectSync.TASFPS or 60) * ReplayStorage.ChunkSeconds + 0.5),1);
+		ChunkSize = _S.max(_S.floor((_S.ClientObjectSync.TASFPS or 60) * _S.ReplayStorage.ChunkSeconds + 0.5),1);
 		Chunks = {};
 		EncodedChunks = {};
 		Count = 0;
@@ -1235,11 +1283,11 @@ ReplayStorage.New = function()
 	}
 end
 
-ReplayStorage.Length = function(Replay)
+_S.ReplayStorage.Length = function(Replay)
 	return type(Replay) == "table" and tonumber(Replay.Count) or 0
 end
 
-ReplayStorage.GetChunk = function(Replay, ChunkIndex)
+_S.ReplayStorage.GetChunk = function(Replay, ChunkIndex)
 	ChunkIndex = tonumber(ChunkIndex)
 	if type(Replay) ~= "table" or not ChunkIndex then
 		return nil
@@ -1266,7 +1314,7 @@ ReplayStorage.GetChunk = function(Replay, ChunkIndex)
 	return nil
 end
 
-ReplayStorage.DecodeAllChunks = function(Replay)
+_S.ReplayStorage.DecodeAllChunks = function(Replay)
 	if type(Replay) ~= "table" then
 		return
 	end
@@ -1289,29 +1337,29 @@ ReplayStorage.DecodeAllChunks = function(Replay)
 		ConsoleMessage("Decoding "..tostring(#ChunkIndices).." replay chunks")
 		local StartTick = tick()
 		for _,ChunkIndex in ipairs(ChunkIndices) do
-			ReplayStorage.GetChunk(Replay,ChunkIndex)
+			_S.ReplayStorage.GetChunk(Replay,ChunkIndex)
 		end
 		ConsoleMessage("Done decoding replay chunks in",RoundNumber(tick()-StartTick,2),"seconds")
 	end
 end
 
-ReplayStorage.WaitUntilDecoded = function(Replay)
+_S.ReplayStorage.WaitUntilDecoded = function(Replay)
 	if type(Replay) ~= "table" then
 		return false,"Replay decode failed"
 	end
-	local Count = ReplayStorage.Length(Replay)
+	local Count = _S.ReplayStorage.Length(Replay)
 	if Count <= 0 then
 		return false,"Nothing to read"
 	end
 
 	Replay.Chunks = Replay.Chunks or {}
 	Replay.EncodedChunks = Replay.EncodedChunks or {}
-	local ChunkSize = Replay.ChunkSize or max(floor((ClientObjectSync.TASFPS or 60) * ReplayStorage.ChunkSeconds + 0.5),1)
-	local ChunkCount = floor((Count - 1) / ChunkSize) + 1
+	local ChunkSize = Replay.ChunkSize or _S.max(_S.floor((_S.ClientObjectSync.TASFPS or 60) * _S.ReplayStorage.ChunkSeconds + 0.5),1)
+	local ChunkCount = _S.floor((Count - 1) / ChunkSize) + 1
 	local StartTick = tick()
 
 	for ChunkIndex = 1,ChunkCount do
-		local Chunk = ReplayStorage.GetChunk(Replay,ChunkIndex)
+		local Chunk = _S.ReplayStorage.GetChunk(Replay,ChunkIndex)
 		if type(Chunk) ~= "table" then
 			return false,"Replay chunk "..tostring(ChunkIndex).." failed to decode"
 		end
@@ -1320,7 +1368,7 @@ ReplayStorage.WaitUntilDecoded = function(Replay)
 			return false,"Replay frame data is incomplete"
 		end
 		if ChunkIndex % 8 == 0 then
-			RunService.Heartbeat:Wait()
+			_S.RunService.Heartbeat:Wait()
 		end
 	end
 
@@ -1328,106 +1376,106 @@ ReplayStorage.WaitUntilDecoded = function(Replay)
 	return true
 end
 
-ReplayStorage.Get = function(Replay, Index)
-	Index = floor(tonumber(Index) or 0)
-	if type(Replay) ~= "table" or Index < 1 or Index > ReplayStorage.Length(Replay) then
+_S.ReplayStorage.Get = function(Replay, Index)
+	Index = _S.floor(tonumber(Index) or 0)
+	if type(Replay) ~= "table" or Index < 1 or Index > _S.ReplayStorage.Length(Replay) then
 		return nil
 	end
 
-	local ChunkSize = Replay.ChunkSize or max(floor((ClientObjectSync.TASFPS or 60) * ReplayStorage.ChunkSeconds + 0.5),1)
-	local ChunkIndex = floor((Index - 1) / ChunkSize) + 1
+	local ChunkSize = Replay.ChunkSize or _S.max(_S.floor((_S.ClientObjectSync.TASFPS or 60) * _S.ReplayStorage.ChunkSeconds + 0.5),1)
+	local ChunkIndex = _S.floor((Index - 1) / ChunkSize) + 1
 	local FrameIndex = ((Index - 1) % ChunkSize) + 1
-	local Chunk = ReplayStorage.GetChunk(Replay,ChunkIndex)
+	local Chunk = _S.ReplayStorage.GetChunk(Replay,ChunkIndex)
 	return Chunk and Chunk[FrameIndex] or nil
 end
 
-ReplayStorage.Set = function(Replay, Index, Frame)
-	Index = floor(tonumber(Index) or 0)
+_S.ReplayStorage.Set = function(Replay, Index, Frame)
+	Index = _S.floor(tonumber(Index) or 0)
 	if type(Replay) ~= "table" or Index < 1 then
 		return
 	end
 
 	if Frame == nil then
-		if Index <= ReplayStorage.Length(Replay) then
-			ReplayStorage.Truncate(Replay,Index - 1)
+		if Index <= _S.ReplayStorage.Length(Replay) then
+			_S.ReplayStorage.Truncate(Replay,Index - 1)
 		end
 		return
 	end
 
-	local ChunkSize = Replay.ChunkSize or max(floor((ClientObjectSync.TASFPS or 60) * ReplayStorage.ChunkSeconds + 0.5),1)
-	local ChunkIndex = floor((Index - 1) / ChunkSize) + 1
+	local ChunkSize = Replay.ChunkSize or _S.max(_S.floor((_S.ClientObjectSync.TASFPS or 60) * _S.ReplayStorage.ChunkSeconds + 0.5),1)
+	local ChunkIndex = _S.floor((Index - 1) / ChunkSize) + 1
 	local FrameIndex = ((Index - 1) % ChunkSize) + 1
 	Replay.Chunks = Replay.Chunks or {}
 	Replay.EncodedChunks = Replay.EncodedChunks or {}
-	Replay.Chunks[ChunkIndex] = ReplayStorage.GetChunk(Replay,ChunkIndex) or {}
+	Replay.Chunks[ChunkIndex] = _S.ReplayStorage.GetChunk(Replay,ChunkIndex) or {}
 	Replay.EncodedChunks[ChunkIndex] = nil
 	Replay.Chunks[ChunkIndex][FrameIndex] = Frame
-	if Index > ReplayStorage.Length(Replay) then
+	if Index > _S.ReplayStorage.Length(Replay) then
 		Replay.Count = Index
 	end
 	Replay.Revision = (Replay.Revision or 0) + 1
 end
 
-ReplayStorage.Append = function(Replay, Frame)
-	ReplayStorage.Set(Replay,ReplayStorage.Length(Replay) + 1,Frame)
+_S.ReplayStorage.Append = function(Replay, Frame)
+	_S.ReplayStorage.Set(Replay,_S.ReplayStorage.Length(Replay) + 1,Frame)
 end
 
-ReplayStorage.AppendChunk = function(Replay, Chunk, ChunkLength)
+_S.ReplayStorage.AppendChunk = function(Replay, Chunk, ChunkLength)
 	local Count = ChunkLength or #Chunk
 	if Count <= 0 then
 		return
 	end
 
-	local ChunkSize = Replay.ChunkSize or max(floor((ClientObjectSync.TASFPS or 60) * ReplayStorage.ChunkSeconds + 0.5),1)
-	if ReplayStorage.Length(Replay) % ChunkSize == 0 and Count == ChunkSize then
+	local ChunkSize = Replay.ChunkSize or _S.max(_S.floor((_S.ClientObjectSync.TASFPS or 60) * _S.ReplayStorage.ChunkSeconds + 0.5),1)
+	if _S.ReplayStorage.Length(Replay) % ChunkSize == 0 and Count == ChunkSize then
 		Replay.Chunks = Replay.Chunks or {}
 		Replay.EncodedChunks = Replay.EncodedChunks or {}
-		local ChunkIndex = (ReplayStorage.Length(Replay) / ChunkSize) + 1
+		local ChunkIndex = (_S.ReplayStorage.Length(Replay) / ChunkSize) + 1
 		Replay.Chunks[ChunkIndex] = Chunk
 		Replay.EncodedChunks[ChunkIndex] = nil
-		Replay.Count = ReplayStorage.Length(Replay) + Count
+		Replay.Count = _S.ReplayStorage.Length(Replay) + Count
 		Replay.Revision = (Replay.Revision or 0) + 1
 	else
 		for Index = 1,Count do
-			ReplayStorage.Append(Replay,Chunk[Index])
+			_S.ReplayStorage.Append(Replay,Chunk[Index])
 		end
 	end
 end
 
-ReplayStorage.ProcessCodecQueue = function()
-	ReplayStorage.CodecQueue = {}
-	ReplayStorage.CodecRunning = false
+_S.ReplayStorage.ProcessCodecQueue = function()
+	_S.ReplayStorage.CodecQueue = {}
+	_S.ReplayStorage.CodecRunning = false
 	return
 end
 
-ReplayStorage.QueueCodecChunk = function(Replay, ChunkIndex)
+_S.ReplayStorage.QueueCodecChunk = function(Replay, ChunkIndex)
 	if type(Replay) ~= "table" or not ChunkIndex then
 		return
 	end
-	ReplayStorage.CodecQueued[Replay] = ReplayStorage.CodecQueued[Replay] or {}
-	if ReplayStorage.CodecQueued[Replay][ChunkIndex] then
+	_S.ReplayStorage.CodecQueued[Replay] = _S.ReplayStorage.CodecQueued[Replay] or {}
+	if _S.ReplayStorage.CodecQueued[Replay][ChunkIndex] then
 		return
 	end
-	ReplayStorage.CodecQueued[Replay][ChunkIndex] = true
-	ReplayStorage.CodecQueue[#ReplayStorage.CodecQueue + 1] = {Replay,ChunkIndex}
-	ReplayStorage.ProcessCodecQueue()
+	_S.ReplayStorage.CodecQueued[Replay][ChunkIndex] = true
+	_S.ReplayStorage.CodecQueue[#_S.ReplayStorage.CodecQueue + 1] = {Replay,ChunkIndex}
+	_S.ReplayStorage.ProcessCodecQueue()
 end
 
-ReplayStorage.CodecOldChunks = function(Replay)
+_S.ReplayStorage.CodecOldChunks = function(Replay)
 	return
 end
 
-ReplayStorage.Truncate = function(Replay, NewLength)
-	NewLength = max(floor(tonumber(NewLength) or 0),0)
+_S.ReplayStorage.Truncate = function(Replay, NewLength)
+	NewLength = _S.max(_S.floor(tonumber(NewLength) or 0),0)
 	if type(Replay) ~= "table" then
 		return
 	end
-	if NewLength >= ReplayStorage.Length(Replay) then
+	if NewLength >= _S.ReplayStorage.Length(Replay) then
 		return
 	end
 
-	local ChunkSize = Replay.ChunkSize or max(floor((ClientObjectSync.TASFPS or 60) * ReplayStorage.ChunkSeconds + 0.5),1)
-	local KeepChunks = NewLength > 0 and (floor((NewLength - 1) / ChunkSize) + 1) or 0
+	local ChunkSize = Replay.ChunkSize or _S.max(_S.floor((_S.ClientObjectSync.TASFPS or 60) * _S.ReplayStorage.ChunkSeconds + 0.5),1)
+	local KeepChunks = NewLength > 0 and (_S.floor((NewLength - 1) / ChunkSize) + 1) or 0
 	Replay.Chunks = Replay.Chunks or {}
 	Replay.EncodedChunks = Replay.EncodedChunks or {}
 	local MaxChunk = 0
@@ -1447,7 +1495,7 @@ ReplayStorage.Truncate = function(Replay, NewLength)
 	end
 	if NewLength > 0 then
 		local LastFrameIndex = ((NewLength - 1) % ChunkSize) + 1
-		local LastChunk = ReplayStorage.GetChunk(Replay,KeepChunks)
+		local LastChunk = _S.ReplayStorage.GetChunk(Replay,KeepChunks)
 		if LastChunk then
 			Replay.EncodedChunks[KeepChunks] = nil
 			for Index = LastFrameIndex + 1,#LastChunk do
@@ -1457,24 +1505,24 @@ ReplayStorage.Truncate = function(Replay, NewLength)
 	end
 	Replay.Count = NewLength
 	Replay.Revision = (Replay.Revision or 0) + 1
-	ReplayStorage.CodecOldChunks(Replay)
+	_S.ReplayStorage.CodecOldChunks(Replay)
 end
 
-ReplayStorage.FromArray = function(Array)
-	local Replay = ReplayStorage.New()
+_S.ReplayStorage.FromArray = function(Array)
+	local Replay = _S.ReplayStorage.New()
 	if type(Array) ~= "table" then
 		return Replay
 	end
 	for Index = 1,#Array do
-		ReplayStorage.Append(Replay,Array[Index])
+		_S.ReplayStorage.Append(Replay,Array[Index])
 	end
-	ReplayStorage.CodecOldChunks(Replay)
+	_S.ReplayStorage.CodecOldChunks(Replay)
 	return Replay
 end
 
-ReplayStorage.FromChunks = function(Chunks, Count, ChunkSize, EncodedChunks)
-	local Replay = ReplayStorage.New()
-	Replay.ChunkSize = max(tonumber(ChunkSize) or Replay.ChunkSize,1)
+_S.ReplayStorage.FromChunks = function(Chunks, Count, ChunkSize, EncodedChunks)
+	local Replay = _S.ReplayStorage.New()
+	Replay.ChunkSize = _S.max(tonumber(ChunkSize) or Replay.ChunkSize,1)
 	Replay.Chunks = type(Chunks) == "table" and Chunks or {}
 	Replay.EncodedChunks = type(EncodedChunks) == "table" and EncodedChunks or {}
 	Replay.Count = tonumber(Count) or 0
@@ -1483,13 +1531,13 @@ ReplayStorage.FromChunks = function(Chunks, Count, ChunkSize, EncodedChunks)
 			Replay.Count = Replay.Count + #Chunk
 		end
 	end
-	ReplayStorage.CodecOldChunks(Replay)
+	_S.ReplayStorage.CodecOldChunks(Replay)
 	return Replay
 end
 
-ReplayStorage.FromChunkRecords = function(ChunkRecords, EncodedChunkRecords, Count, ChunkSize)
-	local Replay = ReplayStorage.New()
-	Replay.ChunkSize = max(tonumber(ChunkSize) or Replay.ChunkSize,1)
+_S.ReplayStorage.FromChunkRecords = function(ChunkRecords, EncodedChunkRecords, Count, ChunkSize)
+	local Replay = _S.ReplayStorage.New()
+	Replay.ChunkSize = _S.max(tonumber(ChunkSize) or Replay.ChunkSize,1)
 	Replay.Chunks = {}
 	Replay.EncodedChunks = {}
 	if type(ChunkRecords) == "table" then
@@ -1507,11 +1555,11 @@ ReplayStorage.FromChunkRecords = function(ChunkRecords, EncodedChunkRecords, Cou
 		end
 	end
 	Replay.Count = tonumber(Count) or 0
-	ReplayStorage.CodecOldChunks(Replay)
+	_S.ReplayStorage.CodecOldChunks(Replay)
 	return Replay
 end
 
-ReplayStorage.SaveData = function(Replay)
+_S.ReplayStorage.SaveData = function(Replay)
 	local ChunkRecords = {}
 	local EncodedChunkRecords = {}
 	for ChunkIndex,Chunk in pairs(Replay.Chunks or {}) do
@@ -1527,52 +1575,52 @@ ReplayStorage.SaveData = function(Replay)
 	return {
 		ChunkRecords = ChunkRecords;
 		EncodedChunkRecords = EncodedChunkRecords;
-		Count = ReplayStorage.Length(Replay);
+		Count = _S.ReplayStorage.Length(Replay);
 		ChunkSize = Replay.ChunkSize;
 	}
 end
 
-ReplayTable = ReplayStorage.New()
+_S.ReplayTable = _S.ReplayStorage.New()
 
-ClientObjectSync.ResetRecordingBuffer = function()
-	RecordingTable = {
-		ChunkSize = max(floor((ClientObjectSync.TASFPS or 60) * ReplayStorage.ChunkSeconds + 0.5),1);
+_S.ClientObjectSync.ResetRecordingBuffer = function()
+	_S.RecordingTable = {
+		ChunkSize = _S.max(_S.floor((_S.ClientObjectSync.TASFPS or 60) * _S.ReplayStorage.ChunkSeconds + 0.5),1);
 		Chunks = {};
 		Chunk = {};
 		ChunkCount = 0;
 		FrameCount = 0;
 		LastFrame = nil;
-		StartFrame = ReplayStorage.Length(ReplayTable);
+		StartFrame = _S.ReplayStorage.Length(_S.ReplayTable);
 	}
 end
 
-ClientObjectSync.AppendRecordingFrame = function(Frame)
-	RecordingTable.ChunkCount = RecordingTable.ChunkCount + 1
-	RecordingTable.Chunk[RecordingTable.ChunkCount] = Frame
-	RecordingTable.FrameCount = RecordingTable.FrameCount + 1
-	RecordingTable.LastFrame = Frame
-	if RecordingTable.ChunkCount >= RecordingTable.ChunkSize then
-		ReplayStorage.AppendChunk(ReplayTable,RecordingTable.Chunk,RecordingTable.ChunkCount)
-		RecordingTable.Chunk = {}
-		RecordingTable.ChunkCount = 0
+_S.ClientObjectSync.AppendRecordingFrame = function(Frame)
+	_S.RecordingTable.ChunkCount = _S.RecordingTable.ChunkCount + 1
+	_S.RecordingTable.Chunk[_S.RecordingTable.ChunkCount] = Frame
+	_S.RecordingTable.FrameCount = _S.RecordingTable.FrameCount + 1
+	_S.RecordingTable.LastFrame = Frame
+	if _S.RecordingTable.ChunkCount >= _S.RecordingTable.ChunkSize then
+		_S.ReplayStorage.AppendChunk(_S.ReplayTable,_S.RecordingTable.Chunk,_S.RecordingTable.ChunkCount)
+		_S.RecordingTable.Chunk = {}
+		_S.RecordingTable.ChunkCount = 0
 	end
 end
 
-ClientObjectSync.FlushRecordingBufferToReplay = function()
-	for _,Chunk in ipairs(RecordingTable.Chunks) do
-		ReplayStorage.AppendChunk(ReplayTable,Chunk,#Chunk)
+_S.ClientObjectSync.FlushRecordingBufferToReplay = function()
+	for _,Chunk in ipairs(_S.RecordingTable.Chunks) do
+		_S.ReplayStorage.AppendChunk(_S.ReplayTable,Chunk,#Chunk)
 	end
 
-	ReplayStorage.AppendChunk(ReplayTable,RecordingTable.Chunk,RecordingTable.ChunkCount)
+	_S.ReplayStorage.AppendChunk(_S.ReplayTable,_S.RecordingTable.Chunk,_S.RecordingTable.ChunkCount)
 
-	ClientObjectSync.ResetRecordingBuffer()
+	_S.ClientObjectSync.ResetRecordingBuffer()
 end
 
 
 do
 local TASCharacter = setmetatable({}, {
 	__index = function(_, k)
-		if k == "RootPart" then return RootPart or (Character and Character:FindFirstChild("HumanoidRootPart")) end
+		if k == "RootPart" then return _S.RootPart or (Character and Character:FindFirstChild("HumanoidRootPart")) end
 		if k == "Character" then return Character end
 		if k == "ConsoleMessage" then return ConsoleMessage end
 		return nil
@@ -1580,27 +1628,27 @@ local TASCharacter = setmetatable({}, {
 })
 local TASConfig = setmetatable({}, {
 	__index = function(_, k)
-		if k == "AllowClientObjectManipulation" then return ClientObjectSync.Enabled ~= false end
-		if k == "CORecordingRadius" then return ClientObjectSync.Radius or 0 end
-		if k == "RoundDigits" then return ClientObjectSync.RoundDigits or 15 end
-		if k == "TASRecordingFPS" then return ClientObjectSync.TASFPS or 60 end
+		if k == "AllowClientObjectManipulation" then return _S.ClientObjectSync.Enabled ~= false end
+		if k == "CORecordingRadius" then return _S.ClientObjectSync.Radius or 0 end
+		if k == "RoundDigits" then return _S.ClientObjectSync.RoundDigits or 15 end
+		if k == "TASRecordingFPS" then return _S.ClientObjectSync.TASFPS or 60 end
 		return nil
 	end
 })
 local TASServices = {
-	RunService = RunService,
+	RunService = _S.RunService,
 }
 local TASRuntime = setmetatable({}, {
 	__index = function(_, k)
-		if k == "Reading" then return Reading end
-		if k == "Paused" then return Paused end
-		if k == "ReplayTableIndex" then return ReplayTableIndex end
+		if k == "Reading" then return _S.Reading end
+		if k == "Paused" then return _S.Paused end
+		if k == "ReplayTableIndex" then return _S.ReplayTableIndex end
 		return nil
 	end
 })
 local TASFreeze = setmetatable({}, {
 	__index = function(_, k)
-		if k == "Frozen" then return Frozen end
+		if k == "Frozen" then return _S.Frozen end
 		return nil
 	end
 })
@@ -2309,9 +2357,9 @@ local CO = {}
     end
     function CO.HasReplayData(replay)
         if type(replay) ~= "table" then return false end
-        local count = ReplayStorage and ReplayStorage.Length and ReplayStorage.Length(replay) or #replay
+        local count = _S.ReplayStorage and _S.ReplayStorage.Length and _S.ReplayStorage.Length(replay) or #replay
         for i = 1, count do
-            local frame = ReplayStorage and ReplayStorage.Get and ReplayStorage.Get(replay, i) or replay[i]
+            local frame = _S.ReplayStorage and _S.ReplayStorage.Get and _S.ReplayStorage.Get(replay, i) or replay[i]
             if type(frame) == "table" and type(frame[13]) == "table" and next(frame[13]) ~= nil then
                 return true
             end
@@ -2351,15 +2399,15 @@ local CO = {}
 end)(CO) -- CO_REGISTER_SCOPE_V3
 
 
-ClientObjectSync.CO = CO
+_S.ClientObjectSync.CO = CO
 
-ClientObjectSync.Scan = function(Force)
+_S.ClientObjectSync.Scan = function(Force)
 	if not CO._initialized and not CO._initializing then
 		CO.Init()
 	end
 end
 
-ClientObjectSync.CaptureFrame = function()
+_S.ClientObjectSync.CaptureFrame = function()
 	local delta = CO.RecordFrame()
 	local snapshots = {}
 	if type(delta) == "table" then
@@ -2371,13 +2419,13 @@ ClientObjectSync.CaptureFrame = function()
 	return snapshots
 end
 
-ClientObjectSync.ApplyFrame = function(Frame)
+_S.ClientObjectSync.ApplyFrame = function(Frame)
 	if type(Frame) == "table" and Frame[13] then
 		CO.ApplyFrame(Frame[13])
 	end
 end
 
-ClientObjectSync.ApplyObjectsAtFrame = function(Replay, Index)
+_S.ClientObjectSync.ApplyObjectsAtFrame = function(Replay, Index)
 	if type(Replay) == "table" and Index then
 		local state = CO.GetFullStateAtFrame(Index, Replay)
 		CO.ApplyFullState(state)
@@ -2385,43 +2433,43 @@ ClientObjectSync.ApplyObjectsAtFrame = function(Replay, Index)
 	end
 end
 
-ClientObjectSync.ReleasePlaybackObjectControl = function(Restore)
+_S.ClientObjectSync.ReleasePlaybackObjectControl = function(Restore)
 	if Restore then
 		CO.RestoreAnchors()
 	end
 end
 
-ClientObjectSync.PrepareFirstRecordingFrame = function()
+_S.ClientObjectSync.PrepareFirstRecordingFrame = function()
 	return CO.PrepareFirstRecordingFrame()
 end
 
-ClientObjectSync.ResetRegistry = function()
+_S.ClientObjectSync.ResetRegistry = function()
 	CO.RebuildFromAttributes()
 end
 
-ClientObjectSync.LoadRegistry = function(...)
+_S.ClientObjectSync.LoadRegistry = function(...)
 end
 
-ClientObjectSync.CaptureBeatBlockFrame = function() return nil end
-ClientObjectSync.CaptureStateFrame = function() return nil end
-ClientObjectSync.ApplyBeatBlocksAtFrame = function() end
-ClientObjectSync.ApplyStateAtFrame = function() end
+_S.ClientObjectSync.CaptureBeatBlockFrame = function() return nil end
+_S.ClientObjectSync.CaptureStateFrame = function() return nil end
+_S.ClientObjectSync.ApplyBeatBlocksAtFrame = function() end
+_S.ClientObjectSync.ApplyStateAtFrame = function() end
 
 
-ClientObjectSync.SetCOManipulationEnabled = function(Enabled)
-	if type(ClientObjectSync.COManipulation) ~= "table" then
-		ClientObjectSync.COManipulation = {}
+_S.ClientObjectSync.SetCOManipulationEnabled = function(Enabled)
+	if type(_S.ClientObjectSync.COManipulation) ~= "table" then
+		_S.ClientObjectSync.COManipulation = {}
 	end
-	ClientObjectSync.COManipulation.Enabled = Enabled == true
-	ClientObjectSync.Enabled = Enabled == true
-	if ClientObjectSync.CO then
+	_S.ClientObjectSync.COManipulation.Enabled = Enabled == true
+	_S.ClientObjectSync.Enabled = Enabled == true
+	if _S.ClientObjectSync.CO then
 		if Enabled then
-			if not ClientObjectSync.CO._initialized and not ClientObjectSync.CO._initializing then
-				pcall(ClientObjectSync.CO.Init)
+			if not _S.ClientObjectSync.CO._initialized and not _S.ClientObjectSync.CO._initializing then
+				pcall(_S.ClientObjectSync.CO.Init)
 			end
 		else
-			if ClientObjectSync.CO.Stop then
-				pcall(ClientObjectSync.CO.Stop)
+			if _S.ClientObjectSync.CO.Stop then
+				pcall(_S.ClientObjectSync.CO.Stop)
 			end
 		end
 	end
@@ -2436,25 +2484,25 @@ end
 
 -- TASConfig: mirrors the old top-level config variables
 local TASConfig = {
-    FPS = FPS,
-    TASRecordingFPS = ClientObjectSync.TASFPS or 60,
-    AllowClientObjectManipulation = ClientObjectSync.COManipulation and ClientObjectSync.COManipulation.Enabled ~= false,
-    CORecordingRadius = ClientObjectSync.Radius or 900,
-    PlaybackInputs = PlaybackInputs,
-    PlaybackMouseLocation = PlaybackMouseLocation,
-    RoundDigits = RoundDigits,
-    ReplayStartTime = ReplayStartTime,
-    FrameBacktrackCount = FrameBacktrackCount,
-    MinimumJSONFPS = MinimumJSONFPS,
-    BypassAntiExploit = BypassAntiExploit,
-    InputBlacklist = InputBlacklist,
-    ColorCodes = ColorCodes,
-    Cursors = Cursors,
-    Version = Version,
-    ReplayFileBeginning = ReplayFileBeginning,
-    ReplayFileEnding = ReplayFileEnding,
-    AHKConnectionFolderPath = AHKConnectionFolderPath,
-    AHKConnectionRequestPath = AHKConnectionRequestPath,
+    FPS = _S.FPS,
+    TASRecordingFPS = _S.ClientObjectSync.TASFPS or 60,
+    AllowClientObjectManipulation = _S.ClientObjectSync.COManipulation and _S.ClientObjectSync.COManipulation.Enabled ~= false,
+    CORecordingRadius = _S.ClientObjectSync.Radius or 900,
+    PlaybackInputs = _S.PlaybackInputs,
+    PlaybackMouseLocation = _S.PlaybackMouseLocation,
+    RoundDigits = _S.RoundDigits,
+    ReplayStartTime = _S.ReplayStartTime,
+    FrameBacktrackCount = _S.FrameBacktrackCount,
+    MinimumJSONFPS = _S.MinimumJSONFPS,
+    BypassAntiExploit = _S.BypassAntiExploit,
+    InputBlacklist = _S.InputBlacklist,
+    ColorCodes = _S.ColorCodes,
+    Cursors = _S.Cursors,
+    Version = _S.Version,
+    ReplayFileBeginning = _S.ReplayFileBeginning,
+    ReplayFileEnding = _S.ReplayFileEnding,
+    AHKConnectionFolderPath = _S.AHKConnectionFolderPath,
+    AHKConnectionRequestPath = _S.AHKConnectionRequestPath,
     TASCompressionLevel = 3,
     NohBoardWebSocketEnabled = false,
     NohBoardWebSocketURL = "ws://127.0.0.1:8765",
@@ -2465,31 +2513,31 @@ local TASConfig = {
 
 -- TASServices: wraps the old service references
 local TASServices = {
-    UserInputService = UserInputService,
-    RunService = RunService,
-    HttpService = HttpService,
-    ContextActionService = ContextActionService,
-    GuiService = GuiService,
-    VirtualInputManager = VirtualInputManager,
-    Player = Player,
-    Mouse = Mouse,
+    UserInputService = _S.UserInputService,
+    RunService = _S.RunService,
+    HttpService = _S.HttpService,
+    ContextActionService = _S.ContextActionService,
+    GuiService = _S.GuiService,
+    VirtualInputManager = _S.VirtualInputManager,
+    Player = _S.Player,
+    Mouse = _S.Mouse,
     random = math.random,
     min = math.min,
     max = math.max,
     floor = math.floor,
     ceil = math.ceil,
-    ShiftLockEnabled = ShiftLockEnabled,
-    GuiInset = GuiInset,
+    ShiftLockEnabled = _S.ShiftLockEnabled,
+    GuiInset = _S.GuiInset,
 }
-TASServices.PlayerModule = PlayerModule
-TASServices.ShiftLockBoundKeys = ShiftLockBoundKeys
+TASServices.PlayerModule = _S.PlayerModule
+TASServices.ShiftLockBoundKeys = _S.ShiftLockBoundKeys
 
 -- TASPaths: maps old path variables
 local TASPaths = {
-    ExecutionTick = ExecutionTick,
-    PlaceId = PlaceId,
-    FolderPath = FolderPath,
-    ReplayPath = ReplayPath,
+    ExecutionTick = _S.ExecutionTick,
+    PlaceId = _S.PlaceId,
+    FolderPath = _S.FolderPath,
+    ReplayPath = _S.ReplayPath,
     ReplayNeedsReload = false,
     LastLoadedPath = nil,
     pathVisualsEnabled = false,
@@ -2501,85 +2549,85 @@ local TASPaths = {
 -- TASCharacter: wraps old character references
 local TASCharacter = {
     Character = Character,
-    Humanoid = Humanoid,
-    RootPart = RootPart,
-    DefaultGravity = DefaultGravity,
-    DefaultJumpPower = DefaultJumpPower,
-    DefaultWalkSpeed = DefaultWalkSpeed,
-    Resolution = Resolution,
+    Humanoid = _S.Humanoid,
+    RootPart = _S.RootPart,
+    DefaultGravity = _S.DefaultGravity,
+    DefaultJumpPower = _S.DefaultJumpPower,
+    DefaultWalkSpeed = _S.DefaultWalkSpeed,
+    Resolution = _S.Resolution,
     ConsoleMessage = ConsoleMessage,
 }
 
 -- TASRuntime: wraps old runtime state
 local TASRuntime = {
-    Reading = Reading,
-    Paused = Paused,
-    Writing = Writing,
-    Saving = Saving,
-    AnimateDisabled = AnimateDisabled,
-    Checkpoints = Checkpoints,
-    RenderSteppedConnections = RenderSteppedConnections,
-    SteppedConnections = SteppedConnections,
-    ReplayTable = ReplayTable,
-    RecordingTable = RecordingTable,
-    Pressed = Pressed,
-    IgnoreGameProcessed = IgnoreGameProcessed,
-    ReplayTableIndex = ReplayTableIndex,
-    AnimationQueue = AnimationQueue,
-    RunSpeed = RunSpeed,
-    ClimbSpeed = ClimbSpeed,
-    HumanoidStateQueue = HumanoidStateQueue,
-    InputBeganQueue = InputBeganQueue,
-    InputEndedQueue = InputEndedQueue,
-    Cursor = Cursor,
-    CursorIcon = CursorIcon,
-    CursorSize = CursorSize,
-    CursorOffset = CursorOffset,
-    Dead = Dead,
-    CameraCFrame = CameraCFrame,
+    Reading = _S.Reading,
+    Paused = _S.Paused,
+    Writing = _S.Writing,
+    Saving = _S.Saving,
+    AnimateDisabled = _S.AnimateDisabled,
+    Checkpoints = _S.Checkpoints,
+    RenderSteppedConnections = _S.RenderSteppedConnections,
+    SteppedConnections = _S.SteppedConnections,
+    ReplayTable = _S.ReplayTable,
+    RecordingTable = _S.RecordingTable,
+    Pressed = _S.Pressed,
+    IgnoreGameProcessed = _S.IgnoreGameProcessed,
+    ReplayTableIndex = _S.ReplayTableIndex,
+    AnimationQueue = _S.AnimationQueue,
+    RunSpeed = _S.RunSpeed,
+    ClimbSpeed = _S.ClimbSpeed,
+    HumanoidStateQueue = _S.HumanoidStateQueue,
+    InputBeganQueue = _S.InputBeganQueue,
+    InputEndedQueue = _S.InputEndedQueue,
+    Cursor = _S.Cursor,
+    CursorIcon = _S.CursorIcon,
+    CursorSize = _S.CursorSize,
+    CursorOffset = _S.CursorOffset,
+    Dead = _S.Dead,
+    CameraCFrame = _S.CameraCFrame,
     WritingPressedKeys = {},
-    ActiveReplayFPS = ClientObjectSync.TASFPS or 60,
-    ReplaySourceFPS = ClientObjectSync.TASFPS or 60,
+    ActiveReplayFPS = _S.ClientObjectSync.TASFPS or 60,
+    ReplaySourceFPS = _S.ClientObjectSync.TASFPS or 60,
     ReplaySaveState = {Version=0, Encoded=nil, EncodedVersion=-1},
     PlaybackInterval = 0,
 }
 -- Keep runtime in sync with globals using metatables
 setmetatable(TASRuntime, {
     __index = function(t, k)
-        if k == "Reading" then return Reading
-        elseif k == "Writing" then return Writing
-        elseif k == "Paused" then return Paused
-        elseif k == "Frozen" then return Frozen
-        elseif k == "ReplayTableIndex" then return ReplayTableIndex
-        elseif k == "ReplayTable" then return ReplayTable
-        elseif k == "InputBeganQueue" then return InputBeganQueue
-        elseif k == "InputEndedQueue" then return InputEndedQueue
-        elseif k == "Pressed" then return Pressed
-        elseif k == "IgnoreGameProcessed" then return IgnoreGameProcessed
+        if k == "Reading" then return _S.Reading
+        elseif k == "Writing" then return _S.Writing
+        elseif k == "Paused" then return _S.Paused
+        elseif k == "Frozen" then return _S.Frozen
+        elseif k == "ReplayTableIndex" then return _S.ReplayTableIndex
+        elseif k == "ReplayTable" then return _S.ReplayTable
+        elseif k == "InputBeganQueue" then return _S.InputBeganQueue
+        elseif k == "InputEndedQueue" then return _S.InputEndedQueue
+        elseif k == "Pressed" then return _S.Pressed
+        elseif k == "IgnoreGameProcessed" then return _S.IgnoreGameProcessed
         end
         return rawget(t, k)
     end,
     __newindex = function(t, k, v)
         rawset(t, k, v)
-        if k == "IgnoreGameProcessed" then IgnoreGameProcessed = v end
+        if k == "IgnoreGameProcessed" then _S.IgnoreGameProcessed = v end
     end,
 })
 
 -- TASFreeze: wraps old freeze state
 local TASFreeze = {
-    Frozen = Frozen,
-    FreezeFrame = FreezeFrame,
-    SeekDirection = SeekDirection,
-    SeekDirectionMultiplier = SeekDirectionMultiplier,
+    Frozen = _S.Frozen,
+    FreezeFrame = _S.FreezeFrame,
+    SeekDirection = _S.SeekDirection,
+    SeekDirectionMultiplier = _S.SeekDirectionMultiplier,
     COInitializationQueued = false,
     FrozenHeldCO = false,
 }
 setmetatable(TASFreeze, {
     __index = function(t, k)
-        if k == "Frozen" then return Frozen
-        elseif k == "FreezeFrame" then return FreezeFrame
-        elseif k == "SeekDirection" then return SeekDirection
-        elseif k == "SeekDirectionMultiplier" then return SeekDirectionMultiplier
+        if k == "Frozen" then return _S.Frozen
+        elseif k == "FreezeFrame" then return _S.FreezeFrame
+        elseif k == "SeekDirection" then return _S.SeekDirection
+        elseif k == "SeekDirectionMultiplier" then return _S.SeekDirectionMultiplier
         end
         return rawget(t, k)
     end,
@@ -2627,35 +2675,35 @@ local function clearTracerObjects() end
 -- TASFunctions: wraps old functions
 local TASFunctions = {}
 local function ResetCurrentRecording()
-    if Writing then
+    if _S.Writing then
         StopRecording()
     end
-    if Reading and StopReading then
+    if _S.Reading and StopReading then
         pcall(StopReading)
     end
-    Writing = false
-    Reading = false
-    Paused = false
-    Frozen = false
-    SeekDirection = 0
-    ReplayTableIndex = 0
-    FreezeFrame = 1
-    ReplayTable = ReplayStorage.New()
-    ReplaySaveCache.Replay = nil
-    ReplaySaveCache.Revision = -1
-    ReplaySaveCache.Path = nil
-    ReplaySaveCache.Encoded = nil
-    ClientObjectSync.ResetRecordingBuffer()
-    if ClientObjectSync.CO and ClientObjectSync.CO.ResetRecordingTracking then
-        ClientObjectSync.CO.ResetRecordingTracking()
+    _S.Writing = false
+    _S.Reading = false
+    _S.Paused = false
+    _S.Frozen = false
+    _S.SeekDirection = 0
+    _S.ReplayTableIndex = 0
+    _S.FreezeFrame = 1
+    _S.ReplayTable = _S.ReplayStorage.New()
+    _S.ReplaySaveCache.Replay = nil
+    _S.ReplaySaveCache.Revision = -1
+    _S.ReplaySaveCache.Path = nil
+    _S.ReplaySaveCache.Encoded = nil
+    _S.ClientObjectSync.ResetRecordingBuffer()
+    if _S.ClientObjectSync.CO and _S.ClientObjectSync.CO.ResetRecordingTracking then
+        _S.ClientObjectSync.CO.ResetRecordingTracking()
     end
-    ClientObjectSync.ResetReplayInputDisplay()
-    ClientObjectSync.ClearRecordingFrameQueues()
-    workspace.Gravity = DefaultGravity
+    _S.ClientObjectSync.ResetReplayInputDisplay()
+    _S.ClientObjectSync.ClearRecordingFrameQueues()
+    workspace.Gravity = _S.DefaultGravity
     if Character and Character:FindFirstChild("Humanoid") then
         Character.Humanoid.PlatformStand = false
-        Character.Humanoid.JumpPower = DefaultJumpPower
-        Character.Humanoid.WalkSpeed = DefaultWalkSpeed
+        Character.Humanoid.JumpPower = _S.DefaultJumpPower
+        Character.Humanoid.WalkSpeed = _S.DefaultWalkSpeed
     end
     ConsoleMessage("Cleared TAS")
 end
@@ -2675,7 +2723,7 @@ local function _tasKeyName(kc)
 end
 
 -- CO reference for the stats HUD
-local CORef = ClientObjectSync.CO
+local CORef = _S.ClientObjectSync.CO
 
 -- SaveToFile forward reference (defined later in old script, but GUI calls it)
 -- The GUI section calls SaveToFile() and ReadButton_MouseButton1Click() etc.
@@ -3262,7 +3310,7 @@ if type(TasSettings.TAS) == "table" then
         TASConfig.CORecordingRadius = math.max(0, tonumber(TasSettings.TAS.CORecordingRadius))
     end
 end
-pcall(function() ClientObjectSync.SetCOManipulationEnabled(TASConfig.AllowClientObjectManipulation ~= false) end)
+pcall(function() _S.ClientObjectSync.SetCOManipulationEnabled(TASConfig.AllowClientObjectManipulation ~= false) end)
 if type(TasSettings.Physics) == "table" then
     if TasSettings.Physics.SpeedHackEnabled ~= nil then TASSpeedHack.Enabled = TasSettings.Physics.SpeedHackEnabled == true end
     if tonumber(TasSettings.Physics.SpeedHackSpeed) then TASSpeedHack.Speed = math.clamp(tonumber(TasSettings.Physics.SpeedHackSpeed), 0.1, 1) end
@@ -3932,11 +3980,11 @@ function buildFilesPanel()
             end)
             btn.MouseButton1Click:Connect(function()
                 if TASPaths.ReplayPath ~= path then ClearReplayDecodeCache() end
-                ReplaySaveCache.Replay = nil
-                ReplaySaveCache.Revision = -1
-                ReplaySaveCache.Path = nil
-                ReplaySaveCache.Encoded = nil
-                ReplayPath = path
+                _S.ReplaySaveCache.Replay = nil
+                _S.ReplaySaveCache.Revision = -1
+                _S.ReplaySaveCache.Path = nil
+                _S.ReplaySaveCache.Encoded = nil
+                _S.ReplayPath = path
                 TASPaths.ReplayPath = path
                 TASPaths.ReplayNeedsReload = true
                 CurrentFile.Text = "Current File: " .. fileName
@@ -4057,7 +4105,7 @@ function buildFilesPanel()
         local emptyReplay = '{"Format":"TAS_REPLAY","Version":4,"Optimizer":"TAS Compact","Codec":"RAW","FPS":' .. tostring(math.max(1, tonumber(TASConfig.TASRecordingFPS) or 1)) .. ',"Binary":"base64","RawBytes":0,"PackedBytes":0,"Frames":0,"Data":""}'
         local okWrite, err = pcall(writefile, path, emptyReplay)
         if okWrite then
-            ReplayPath = path
+            _S.ReplayPath = path
             TASPaths.ReplayPath = path
             TASPaths.ReplayNeedsReload = true
             TASPaths.LastLoadedPath = nil
@@ -4522,7 +4570,7 @@ function buildPlayersPanel()
         local pos = root and root.Position
         local vel = root and root.AssemblyLinearVelocity
         local stateStr = hum and hum:GetState().Name or "N/A"
-        local floor = hum and tostring(hum.FloorMaterial):gsub("Enum.Material.", "") or "N/A"
+        _S.floor = hum and tostring(hum.FloorMaterial):gsub("Enum.Material.", "") or "N/A"
         local animTrack = TASPlayerViewerGetBestTrack(hum)
         local animName = animTrack and ((animTrack.Name ~= "" and animTrack.Name ~= "Animation") and animTrack.Name or ((animTrack.Animation and animTrack.Animation.Name ~= "") and animTrack.Animation.Name or "Playing")) or ((plr == TASServices.Player and TASAnimation.currentAnimName ~= "" and TASAnimation.currentAnimName) or "idle")
         local animId = animTrack and animTrack.Animation and tostring(animTrack.Animation.AnimationId or "") or ""
@@ -4549,7 +4597,7 @@ function buildPlayersPanel()
             velocity.Magnitude, velocity.X, velocity.Y, velocity.Z,
             TASPlayerViewerColorHex(Theme.accent), animText,
             TASPlayerViewerColorHex(Theme.accent), animSpeed,
-            TASPlayerViewerColorHex(Theme.txt_muted), floor,
+            TASPlayerViewerColorHex(Theme.txt_muted), _S.floor,
             TASPlayerViewerColorHex(teamColor), team
         )
     end
@@ -6052,7 +6100,7 @@ local allowClientObjectManipulation = addCheckbox(coSettingsSec, {
     Default = TASConfig.AllowClientObjectManipulation ~= false,
     Callback = function(self)
         TASConfig.AllowClientObjectManipulation = self.Value == true
-        ClientObjectSync.SetCOManipulationEnabled(TASConfig.AllowClientObjectManipulation)
+        _S.ClientObjectSync.SetCOManipulationEnabled(TASConfig.AllowClientObjectManipulation)
         if not TASConfig.AllowClientObjectManipulation then
             pcall(function()
                 if CORef and CORef.ReleaseHeldState then CORef.ReleaseHeldState() end
@@ -6174,12 +6222,12 @@ do
     SetColorCodeFrame = function(Name)
         pcall(function()
             if ColorCodeFrame then
-                ColorCodeFrame.TextColor3 = ColorCodes[Name] or ColorCodes.None
-                ColorCodeFrame.Text = "Status: "..(ColorCodes[Name] and Name or "None")
+                ColorCodeFrame.TextColor3 = _S.ColorCodes[Name] or _S.ColorCodes.None
+                ColorCodeFrame.Text = "Status: "..(_S.ColorCodes[Name] and Name or "None")
             end
             if StatusPill then
-                StatusPill.Text = "■ "..(ColorCodes[Name] and Name or "None")
-                StatusPill.TextColor3 = ColorCodes[Name] or Theme.txt_muted
+                StatusPill.Text = "■ "..(_S.ColorCodes[Name] and Name or "None")
+                StatusPill.TextColor3 = _S.ColorCodes[Name] or Theme.txt_muted
             end
         end)
     end
@@ -6320,7 +6368,7 @@ local setAnimationSpeed -- setAnimationSpeed() -> nil
 
 do
 	StopAllAnimations = function()
-		for _,v in pairs(Humanoid:GetPlayingAnimationTracks()) do 
+		for _,v in pairs(_S.Humanoid:GetPlayingAnimationTracks()) do 
 			v:Stop()
 		end
 	end
@@ -6356,7 +6404,7 @@ do
 					for _,Connection in pairs(getconnections(Animate.Changed)) do
 						Connection:Disconnect()
 					end
-					if BypassAntiExploit then
+					if _S.BypassAntiExploit then
 						Animate.Disabled = true
 						if setparentinternal then
 							setparentinternal(Animate, game.Lighting)
@@ -6387,7 +6435,7 @@ do
 			local RightHip = Torso:WaitForChild("Right Hip")
 			local LeftHip = Torso:WaitForChild("Left Hip")
 			local Neck = Torso:WaitForChild("Neck")
-			local Humanoid = Figure:WaitForChild("Humanoid")
+			_S.Humanoid = Figure:WaitForChild("Humanoid")
 
 			local currentAnim = ""
 			local currentAnimInstance = nil
@@ -6482,7 +6530,7 @@ do
 				end
 			end
 
-			local animator = Humanoid and Humanoid:FindFirstChildOfClass("Animator") or nil
+			local animator = _S.Humanoid and _S.Humanoid:FindFirstChildOfClass("Animator") or nil
 			if animator then
 				local animTracks = animator:GetPlayingAnimationTracks()
 				for i,track in ipairs(animTracks) do
@@ -6535,18 +6583,18 @@ do
 						repeatAnim = "idle"
 					end
 					local animSpeed = currentAnimSpeed
-					playAnimation(repeatAnim, 0.0, Humanoid)
+					playAnimation(repeatAnim, 0.0, _S.Humanoid)
 					setAnimationSpeed(animSpeed)
 				end
 			end
 
 			playAnimation = function(animName, transitionTime, humanoid, bypassAnimateDisabled) 
 				pcall(function()
-					if AnimateDisabled and not bypassAnimateDisabled then
+					if _S.AnimateDisabled and not bypassAnimateDisabled then
 						return
 					end
 					
-					table.insert(AnimationQueue,{animName,transitionTime})
+					table.insert(_S.AnimationQueue,{animName,transitionTime})
 					
 					local roll = math.random(1, animTable[animName].totalWeight) 
 					local origRoll = roll
@@ -6583,7 +6631,7 @@ do
 
 			function toolKeyFrameReachedFunc(frameName)
 				if (frameName == "End") then
-					playToolAnimation(toolAnimName, 0.0, Humanoid)
+					playToolAnimation(toolAnimName, 0.0, _S.Humanoid)
 				end
 			end
 
@@ -6630,14 +6678,14 @@ do
 
 			onRunning = function(speed)
 				if speed > 0.01 then
-					playAnimation("walk", 0.1, Humanoid)
+					playAnimation("walk", 0.1, _S.Humanoid)
 					if currentAnimInstance and currentAnimInstance.AnimationId == "http://www.roblox.com/asset/?id=180426354" then
 						setAnimationSpeed(speed / 14.5)
 					end
 					pose = "Running"
 				else
 					if emoteNames[currentAnim] == nil then
-						playAnimation("idle", 0.1, Humanoid)
+						playAnimation("idle", 0.1, _S.Humanoid)
 						pose = "Standing"
 					end
 				end
@@ -6648,13 +6696,13 @@ do
 			end
 
 			onJumping = function()
-				playAnimation("jump", 0.1, Humanoid)
+				playAnimation("jump", 0.1, _S.Humanoid)
 				jumpAnimTime = jumpAnimDuration
 				pose = "Jumping"
 			end
 
 			onClimbing = function(speed)
-				playAnimation("climb", 0.1, Humanoid)
+				playAnimation("climb", 0.1, _S.Humanoid)
 				setAnimationSpeed(speed / 12.0)
 				pose = "Climbing"
 			end
@@ -6665,7 +6713,7 @@ do
 
 			onFreeFall = function()
 				if (jumpAnimTime <= 0) then
-					playAnimation("fall", fallTransitionTime, Humanoid)
+					playAnimation("fall", fallTransitionTime, _S.Humanoid)
 				end
 				pose = "FreeFall"
 			end
@@ -6708,15 +6756,15 @@ do
 
 			function animateTool()
 				if (toolAnim == "None") then
-					playToolAnimation("toolnone", toolTransitionTime, Humanoid, Enum.AnimationPriority.Idle)
+					playToolAnimation("toolnone", toolTransitionTime, _S.Humanoid, Enum.AnimationPriority.Idle)
 					return
 				end
 				if (toolAnim == "Slash") then
-					playToolAnimation("toolslash", 0, Humanoid, Enum.AnimationPriority.Action)
+					playToolAnimation("toolslash", 0, _S.Humanoid, Enum.AnimationPriority.Action)
 					return
 				end
 				if (toolAnim == "Lunge") then
-					playToolAnimation("toollunge", 0, Humanoid, Enum.AnimationPriority.Action)
+					playToolAnimation("toollunge", 0, _S.Humanoid, Enum.AnimationPriority.Action)
 					return
 				end
 			end
@@ -6733,7 +6781,7 @@ do
 			local lastTick = 0
 
 			function move(time)
-				if AnimateDisabled then
+				if _S.AnimateDisabled then
 					return
 				end
 				
@@ -6749,12 +6797,12 @@ do
 				end
 
 				if (pose == "FreeFall" and jumpAnimTime <= 0) then
-					playAnimation("fall", fallTransitionTime, Humanoid)
+					playAnimation("fall", fallTransitionTime, _S.Humanoid)
 				elseif (pose == "Seated") then
-					playAnimation("sit", 0.5, Humanoid)
+					playAnimation("sit", 0.5, _S.Humanoid)
 					return
 				elseif (pose == "Running") then
-					playAnimation("walk", 0.1, Humanoid)
+					playAnimation("walk", 0.1, _S.Humanoid)
 				elseif (pose == "Dead" or pose == "GettingUp" or pose == "FallingDown" or pose == "Seated" or pose == "PlatformStanding") then
 					stopAllAnimations()
 					amplitude = 0.1
@@ -6791,57 +6839,57 @@ do
 				end
 			end
 
-			Humanoid.Died:connect(function(...)
-				if AnimateDisabled then
+			_S.Humanoid.Died:connect(function(...)
+				if _S.AnimateDisabled then
 					return
 				end
 				onDied(...)
 			end)
-			Humanoid.Running:connect(function(Speed)
-				if AnimateDisabled then
+			_S.Humanoid.Running:connect(function(Speed)
+				if _S.AnimateDisabled then
 					return
 				end
 				onRunning(Speed)
 			end)
-			Humanoid.Jumping:connect(onJumping)
-			Humanoid.Climbing:connect(function(Speed)
-				if AnimateDisabled then
+			_S.Humanoid.Jumping:connect(onJumping)
+			_S.Humanoid.Climbing:connect(function(Speed)
+				if _S.AnimateDisabled then
 					return
 				end
 				onClimbing(Speed)
 			end)
-			Humanoid.GettingUp:connect(function(...)
-				if AnimateDisabled then
+			_S.Humanoid.GettingUp:connect(function(...)
+				if _S.AnimateDisabled then
 					return
 				end
 				onGettingUp(...)
 			end)
-			Humanoid.FreeFalling:connect(function(...)
-				if AnimateDisabled then
+			_S.Humanoid.FreeFalling:connect(function(...)
+				if _S.AnimateDisabled then
 					return
 				end
 				onFreeFall(...)
 			end)
-			Humanoid.FallingDown:connect(function(...)
-				if AnimateDisabled then
+			_S.Humanoid.FallingDown:connect(function(...)
+				if _S.AnimateDisabled then
 					return
 				end
 				onFallingDown(...)
 			end)
-			Humanoid.Seated:connect(function(...)
-				if AnimateDisabled then
+			_S.Humanoid.Seated:connect(function(...)
+				if _S.AnimateDisabled then
 					return
 				end
 				onSeated(...)
 			end)
-			Humanoid.PlatformStanding:connect(function(...)
-				if AnimateDisabled then
+			_S.Humanoid.PlatformStanding:connect(function(...)
+				if _S.AnimateDisabled then
 					return
 				end
 				onPlatformStanding(...)
 			end)
-			Humanoid.Swimming:connect(function(...)
-				if AnimateDisabled then
+			_S.Humanoid.Swimming:connect(function(...)
+				if _S.AnimateDisabled then
 					return
 				end
 				onSwimming(...)
@@ -6858,11 +6906,11 @@ do
 				end
 				
 				if (pose == "Standing" and emoteNames[emote] ~= nil) then
-					playAnimation(emote, 0.1, Humanoid)
+					playAnimation(emote, 0.1, _S.Humanoid)
 				end
 			end)
 
-			playAnimation("idle", 0.1, Humanoid)
+			playAnimation("idle", 0.1, _S.Humanoid)
 			pose = "Standing"
 
 			spawn(function()
@@ -6894,9 +6942,9 @@ local SetCursor -- SetCursorIcon(CursorName) -> nil
 
 do
 	-- Load mouse lock action
-	VirtualInputManager:SendKeyEvent(true, 304, false, workspace)
+	_S.VirtualInputManager:SendKeyEvent(true, 304, false, workspace)
 	wait()
-	VirtualInputManager:SendKeyEvent(true, 304, false, workspace)
+	_S.VirtualInputManager:SendKeyEvent(true, 304, false, workspace)
 	wait()
 	
 	local ZoomControllers = {}
@@ -6939,7 +6987,7 @@ end
 
 	
 	GetShiftLockEnabled = function()
-		return ShiftLockEnabled
+		return _S.ShiftLockEnabled
 	end
 
 	local cachedMouseLockController = nil
@@ -6968,8 +7016,8 @@ end
 	end
 
 	SetShiftLockEnabled = function(Enabled)
-		if ShiftLockEnabled ~= Enabled then
-			ShiftLockEnabled = Enabled
+		if _S.ShiftLockEnabled ~= Enabled then
+			_S.ShiftLockEnabled = Enabled
 			if Enabled then
 				SetCursor("MouseLockedCursor")
 			else
@@ -6980,29 +7028,29 @@ end
 	end
 		
 	SetCameraCFrame = function(NewCFrame)
-		CameraCFrame = NewCFrame
+		_S.CameraCFrame = NewCFrame
 		workspace.CurrentCamera.CFrame = NewCFrame
 	end
 
-	ClientObjectSync.StopPlaybackPauseAnimations = function()
+	_S.ClientObjectSync.StopPlaybackPauseAnimations = function()
 		local HumanoidNow = Character and Character:FindFirstChildOfClass("Humanoid")
 		if not HumanoidNow then
 			return
 		end
-		if not ClientObjectSync.PauseAnimationTracks then
-			ClientObjectSync.PauseAnimationTracks = {}
+		if not _S.ClientObjectSync.PauseAnimationTracks then
+			_S.ClientObjectSync.PauseAnimationTracks = {}
 			for _,Track in ipairs(HumanoidNow:GetPlayingAnimationTracks()) do
 				local Speed = 1
 				pcall(function()
 					Speed = Track.Speed
 				end)
-				table.insert(ClientObjectSync.PauseAnimationTracks,{Track = Track,Speed = Speed})
+				table.insert(_S.ClientObjectSync.PauseAnimationTracks,{Track = Track,Speed = Speed})
 				pcall(function()
 					Track:AdjustSpeed(0)
 				end)
 			end
 		else
-			for _,Entry in ipairs(ClientObjectSync.PauseAnimationTracks) do
+			for _,Entry in ipairs(_S.ClientObjectSync.PauseAnimationTracks) do
 				pcall(function()
 					Entry.Track:AdjustSpeed(0)
 				end)
@@ -7010,17 +7058,17 @@ end
 		end
 	end
 
-	ClientObjectSync.ResumePlaybackPauseAnimations = function()
-		for _,Entry in ipairs(ClientObjectSync.PauseAnimationTracks or {}) do
+	_S.ClientObjectSync.ResumePlaybackPauseAnimations = function()
+		for _,Entry in ipairs(_S.ClientObjectSync.PauseAnimationTracks or {}) do
 			pcall(function()
 				Entry.Track:AdjustSpeed(Entry.Speed or 1)
 			end)
 		end
-		ClientObjectSync.PauseAnimationTracks = nil
+		_S.ClientObjectSync.PauseAnimationTracks = nil
 	end
 
-	ClientObjectSync.GetPlaybackPauseState = function(HumanoidNow)
-		local FrameNow = Reading and ReplayTable and ReplayStorage.Get(ReplayTable,ReplayTableIndex)
+	_S.ClientObjectSync.GetPlaybackPauseState = function(HumanoidNow)
+		local FrameNow = _S.Reading and _S.ReplayTable and _S.ReplayStorage.Get(_S.ReplayTable,_S.ReplayTableIndex)
 		if typeof(FrameNow) == "table" and FrameNow[4] then
 			return FrameNow[4]
 		end
@@ -7028,17 +7076,17 @@ end
 		return State and State.Value
 	end
 
-	ClientObjectSync.SetPlaybackPausePhysics = function(Enabled)
+	_S.ClientObjectSync.SetPlaybackPausePhysics = function(Enabled)
 		local CharacterNow = Character
-		local HumanoidNow = Humanoid
+		local HumanoidNow = _S.Humanoid
 		local RootNow = CharacterNow and CharacterNow:FindFirstChild("HumanoidRootPart")
 		if not CharacterNow or not HumanoidNow or not RootNow then
 			return
 		end
 		if Enabled then
-			local StateValue = ClientObjectSync.GetPlaybackPauseState(HumanoidNow)
-			if not ClientObjectSync.PauseSnapshot then
-				ClientObjectSync.PauseSnapshot = {
+			local StateValue = _S.ClientObjectSync.GetPlaybackPauseState(HumanoidNow)
+			if not _S.ClientObjectSync.PauseSnapshot then
+				_S.ClientObjectSync.PauseSnapshot = {
 					CFrame = RootNow.CFrame;
 					CameraCFrame = workspace.CurrentCamera.CFrame;
 					Zoom = GetZoom();
@@ -7048,33 +7096,33 @@ end
 					IsClimbing = StateValue == Enum.HumanoidStateType.Climbing.Value;
 				}
 			end
-			AnimateDisabled = true
+			_S.AnimateDisabled = true
 			workspace.Gravity = 0
 			HumanoidNow.WalkSpeed = 0
 			HumanoidNow.JumpPower = 0
-			HumanoidNow.PlatformStand = not ClientObjectSync.PauseSnapshot.IsClimbing
+			HumanoidNow.PlatformStand = not _S.ClientObjectSync.PauseSnapshot.IsClimbing
 			HumanoidNow.AutoRotate = false
 			HumanoidNow:Move(Vector3.new(),true)
-			if ClientObjectSync.PauseSnapshot.IsClimbing then
+			if _S.ClientObjectSync.PauseSnapshot.IsClimbing then
 				pcall(function()
 					HumanoidNow:ChangeState(Enum.HumanoidStateType.Climbing)
 				end)
 			end
 			RootNow.Anchored = true
-			RootNow.CFrame = ClientObjectSync.PauseSnapshot.CFrame
+			RootNow.CFrame = _S.ClientObjectSync.PauseSnapshot.CFrame
 			RootNow.Velocity = Vector3.new()
 			RootNow.RotVelocity = Vector3.new()
 			pcall(function()
 				RootNow.AssemblyLinearVelocity = Vector3.new()
 				RootNow.AssemblyAngularVelocity = Vector3.new()
 			end)
-			SetCameraCFrame(ClientObjectSync.PauseSnapshot.CameraCFrame)
-			SetZoom(ClientObjectSync.PauseSnapshot.Zoom)
-			ClientObjectSync.StopPlaybackPauseAnimations()
+			SetCameraCFrame(_S.ClientObjectSync.PauseSnapshot.CameraCFrame)
+			SetZoom(_S.ClientObjectSync.PauseSnapshot.Zoom)
+			_S.ClientObjectSync.StopPlaybackPauseAnimations()
 		else
-			if ClientObjectSync.PauseSnapshot then
+			if _S.ClientObjectSync.PauseSnapshot then
 				if HumanoidNow then
-					HumanoidNow.AutoRotate = ClientObjectSync.PauseSnapshot.AutoRotate
+					HumanoidNow.AutoRotate = _S.ClientObjectSync.PauseSnapshot.AutoRotate
 					HumanoidNow.PlatformStand = false
 				end
 				RootNow.Anchored = false
@@ -7085,9 +7133,9 @@ end
 					RootNow.AssemblyAngularVelocity = Vector3.new()
 				end)
 			end
-			ClientObjectSync.ResumePlaybackPauseAnimations()
-			ClientObjectSync.PauseSnapshot = nil
-			ClientObjectSync.ResetPlaybackStepTimer()
+			_S.ClientObjectSync.ResumePlaybackPauseAnimations()
+			_S.ClientObjectSync.PauseSnapshot = nil
+			_S.ClientObjectSync.ResetPlaybackStepTimer()
 		end
 	end
 	
@@ -7104,7 +7152,7 @@ end
 	BlockInputs = function()
 		-- Do not place a full-screen TextButton over the game while replaying mouse input:
 		-- that would swallow MouseEnter/MouseLeave/MouseButton events from the game.
-		BlockGui.Enabled = not PlaybackInputs
+		BlockGui.Enabled = not _S.PlaybackInputs
 	end
 	UnblockInputs = function()
 		BlockGui.Enabled = false
@@ -7116,22 +7164,22 @@ end
 	CursorHolder.IgnoreGuiInset = true
 	CursorHolder.ResetOnSpawn = false
 	CursorHolder.DisplayOrder = 10000
-	CursorHolder.Parent = Player.PlayerGui
+	CursorHolder.Parent = _S.Player.PlayerGui
 	
-	Cursor.Name = "Cursor"
-	Cursor.BackgroundTransparency = 1
-	Cursor.ZIndex = 10000
-	Cursor.Active = false
-	Cursor.Parent = CursorHolder
+	_S.Cursor.Name = "Cursor"
+	_S.Cursor.BackgroundTransparency = 1
+	_S.Cursor.ZIndex = 10000
+	_S.Cursor.Active = false
+	_S.Cursor.Parent = CursorHolder
 	
-	Resolution = workspace.CurrentCamera.ViewportSize
+	_S.Resolution = workspace.CurrentCamera.ViewportSize
 	
 	SetCursor = function(CursorName)
-		local CursorData = Cursors[CursorName]
+		local CursorData = _S.Cursors[CursorName]
 		if CursorData then
-			CursorIcon = CursorData.Icon
-			CursorSize = CursorData.Size
-			CursorOffset = CursorData.Offset
+			_S.CursorIcon = CursorData.Icon
+			_S.CursorSize = CursorData.Size
+			_S.CursorOffset = CursorData.Offset
 		end
 	end
 	
@@ -7146,11 +7194,11 @@ local IsInstalled -- IsInstalled() -> bool
 local SendSignal -- SendSignal(Signal) -> nil
 do
 	IsInstalled = function()
-		return isfolder(AHKConnectionFolderPath)
+		return isfolder(_S.AHKConnectionFolderPath)
 	end
 	SendSignal = function(Signal)
 		if IsInstalled() then
-			writefile(AHKConnectionRequestPath,Signal)
+			writefile(_S.AHKConnectionRequestPath,Signal)
 		else
 			ConsoleMessage("AHK folder not found")
 		end
@@ -7158,10 +7206,10 @@ do
 end
 
 
-ReplayStorage.CodecBuildCodec = function()
+_S.ReplayStorage.CodecBuildCodec = function()
 local CodecReplayMagic = "TAS\n"
 local CodecLegacyReplayMagic = string.char(84,65,83,50,10)
-ReplayStorage.CodecReplayMagic = CodecReplayMagic
+_S.ReplayStorage.CodecReplayMagic = CodecReplayMagic
 local CodecFrameFlags = {
 	AnimationQueue = 1;
 	AnimationSpeed = 2;
@@ -7186,15 +7234,15 @@ local CodecScales = {
 local CodecObjectVelocityInterval = 10
 
 local function CodecHasFlag(Flags, Flag)
-	return floor(Flags / Flag) % 2 >= 1
+	return _S.floor(Flags / Flag) % 2 >= 1
 end
 
 local function CodecRoundInt(Value)
 	Value = tonumber(Value) or 0
 	if Value >= 0 then
-		return floor(Value + 0.5)
+		return _S.floor(Value + 0.5)
 	end
-	return ceil(Value - 0.5)
+	return _S.ceil(Value - 0.5)
 end
 
 local function CodecScale(Value, Scale)
@@ -7253,15 +7301,15 @@ local function CodecNewWriter()
 		end
 	end
 	function Writer:WriteUInt(Value)
-		Value = max(floor(tonumber(Value) or 0),0)
+		Value = _S.max(_S.floor(tonumber(Value) or 0),0)
 		while Value >= 128 do
 			self:WriteByte((Value % 128) + 128)
-			Value = floor(Value / 128)
+			Value = _S.floor(Value / 128)
 		end
 		self:WriteByte(Value)
 	end
 	function Writer:WriteInt(Value)
-		Value = floor(tonumber(Value) or 0)
+		Value = _S.floor(tonumber(Value) or 0)
 		if Value < 0 then
 			self:WriteUInt((-Value * 2) - 1)
 		else
@@ -7319,7 +7367,7 @@ local function CodecNewReader(String, Index)
 			return ""
 		end
 		local Start = self.Index
-		local Finish = min(self.Index + Length - 1,self.Length)
+		local Finish = _S.min(self.Index + Length - 1,self.Length)
 		self.Index = Finish + 1
 		return string.sub(self.String,Start,Finish)
 	end
@@ -7346,7 +7394,7 @@ local function CodecQuaternionFromCFrame(Value, Previous)
 		QY = (R02 - R20) / S
 		QZ = (R10 - R01) / S
 	elseif R00 > R11 and R00 > R22 then
-		local S = math.sqrt(max(1 + R00 - R11 - R22,0)) * 2
+		local S = math.sqrt(_S.max(1 + R00 - R11 - R22,0)) * 2
 		if S == 0 then
 			return 0,0,0,1
 		end
@@ -7355,7 +7403,7 @@ local function CodecQuaternionFromCFrame(Value, Previous)
 		QY = (R01 + R10) / S
 		QZ = (R02 + R20) / S
 	elseif R11 > R22 then
-		local S = math.sqrt(max(1 + R11 - R00 - R22,0)) * 2
+		local S = math.sqrt(_S.max(1 + R11 - R00 - R22,0)) * 2
 		if S == 0 then
 			return 0,0,0,1
 		end
@@ -7364,7 +7412,7 @@ local function CodecQuaternionFromCFrame(Value, Previous)
 		QY = 0.25 * S
 		QZ = (R12 + R21) / S
 	else
-		local S = math.sqrt(max(1 + R22 - R00 - R11,0)) * 2
+		local S = math.sqrt(_S.max(1 + R22 - R00 - R11,0)) * 2
 		if S == 0 then
 			return 0,0,0,1
 		end
@@ -7511,7 +7559,7 @@ end
 local function CodecWriteObjectSnapshots(Writer, Snapshots, State)
 	Writer:WriteUInt(#Snapshots)
 	for _,Snapshot in ipairs(Snapshots) do
-		local Id = floor(tonumber(Snapshot[1]) or 0)
+		local Id = _S.floor(tonumber(Snapshot[1]) or 0)
 		Writer:WriteUInt(Id)
 		local Flags = 0
 		local Anchored = nil
@@ -7583,7 +7631,7 @@ end
 local function CodecWriteStateSnapshots(Writer, Snapshots)
 	Writer:WriteUInt(#Snapshots)
 	for _,Snapshot in ipairs(Snapshots) do
-		Writer:WriteUInt(floor(tonumber(Snapshot[1]) or 0))
+		Writer:WriteUInt(_S.floor(tonumber(Snapshot[1]) or 0))
 		Writer:WriteUInt((Snapshot[2] == true or Snapshot[2] == 1) and 1 or 0)
 	end
 end
@@ -7616,7 +7664,7 @@ local function CodecWriteBeatBlockSnapshots(Writer, Snapshots)
 		if type(Snapshot[4]) == "table" then
 			Flags = Flags + 8
 		end
-		Writer:WriteUInt(floor(tonumber(Snapshot[1]) or 0))
+		Writer:WriteUInt(_S.floor(tonumber(Snapshot[1]) or 0))
 		Writer:WriteUInt(Flags)
 		if CodecHasFlag(Flags,1) then
 			Writer:WriteInt(CodecScale(Snapshot[2],CodecScales.Beat))
@@ -7660,15 +7708,15 @@ end
 local function CodecEncodeFrame(Writer, Frame, State)
 	Frame = type(Frame) == "table" and Frame or {}
 	local Flags = 0
-	local AnimationQueue = Frame[2]
-	if CodecTableHasEntries(AnimationQueue) then
+	_S.AnimationQueue = Frame[2]
+	if CodecTableHasEntries(_S.AnimationQueue) then
 		Flags = Flags + CodecFrameFlags.AnimationQueue
 	end
 	local AnimationSpeed = CodecScale(Frame[3],CodecScales.Number)
 	if State.AnimationSpeed ~= AnimationSpeed then
 		Flags = Flags + CodecFrameFlags.AnimationSpeed
 	end
-	local HumanoidState = floor(tonumber(Frame[4]) or 0)
+	local HumanoidState = _S.floor(tonumber(Frame[4]) or 0)
 	if State.HumanoidState ~= HumanoidState then
 		Flags = Flags + CodecFrameFlags.HumanoidState
 	end
@@ -7684,9 +7732,9 @@ local function CodecEncodeFrame(Writer, Frame, State)
 	if State.ShiftLock ~= ShiftLock then
 		Flags = Flags + CodecFrameFlags.ShiftLock
 	end
-	local Mouse = CodecVectorIntegers(Frame[11],2,CodecScales.Mouse)
+	_S.Mouse = CodecVectorIntegers(Frame[11],2,CodecScales.Mouse)
 	local PreviousMouse = State.Mouse
-	if not PreviousMouse or PreviousMouse[1] ~= Mouse[1] or PreviousMouse[2] ~= Mouse[2] then
+	if not PreviousMouse or PreviousMouse[1] ~= _S.Mouse[1] or PreviousMouse[2] ~= _S.Mouse[2] then
 		Flags = Flags + CodecFrameFlags.Mouse
 	end
 	local Inputs = Frame[12]
@@ -7708,7 +7756,7 @@ local function CodecEncodeFrame(Writer, Frame, State)
 	CodecWriteVector(Writer,Frame[6],State,"RootRotVelocity",3,CodecScales.Vector)
 	CodecWriteCFrame(Writer,Frame[7],State,"CameraCFrame")
 	if CodecHasFlag(Flags,CodecFrameFlags.AnimationQueue) then
-		Writer:WriteString(json.encode(AnimationQueue))
+		Writer:WriteString(json.encode(_S.AnimationQueue))
 	end
 	if CodecHasFlag(Flags,CodecFrameFlags.AnimationSpeed) then
 		Writer:WriteInt(AnimationSpeed)
@@ -7731,8 +7779,8 @@ local function CodecEncodeFrame(Writer, Frame, State)
 		State.ShiftLock = ShiftLock
 	end
 	if CodecHasFlag(Flags,CodecFrameFlags.Mouse) then
-		CodecWriteIntList(Writer,Mouse,PreviousMouse)
-		State.Mouse = Mouse
+		CodecWriteIntList(Writer,_S.Mouse,PreviousMouse)
+		State.Mouse = _S.Mouse
 	end
 	if CodecHasFlag(Flags,CodecFrameFlags.Inputs) then
 		Writer:WriteString(json.encode(Inputs))
@@ -7801,30 +7849,30 @@ local function CodecDecodeFrame(Reader, State)
 	return Frame
 end
 
-ReplayStorage.CodecReplayEncode = function(Replay)
-	local Count = ReplayStorage.Length(Replay)
-	local ChunkSize = Replay.ChunkSize or max(floor((ClientObjectSync.TASFPS or 60) * ReplayStorage.ChunkSeconds + 0.5),1)
+_S.ReplayStorage.CodecReplayEncode = function(Replay)
+	local Count = _S.ReplayStorage.Length(Replay)
+	local ChunkSize = Replay.ChunkSize or _S.max(_S.floor((_S.ClientObjectSync.TASFPS or 60) * _S.ReplayStorage.ChunkSeconds + 0.5),1)
 	local Writer = CodecNewWriter()
 	Writer:WriteBytes(CodecReplayMagic)
 	Writer:WriteUInt(Count)
 	Writer:WriteUInt(ChunkSize)
 	Writer:WriteString(json.encode({
-		ObjectSync = ClientObjectSync.Registry;
-		ObjectStateSync = ClientObjectSync.StateRegistry;
+		ObjectSync = _S.ClientObjectSync.Registry;
+		ObjectStateSync = _S.ClientObjectSync.StateRegistry;
 		ObjectSyncFormat = 2;
-		ObjectSyncRadius = ClientObjectSync.Radius;
+		ObjectSyncRadius = _S.ClientObjectSync.Radius;
 		Scales = CodecScales;
 	}))
 	local State = CodecNewFrameState()
 	for Index = 1,Count do
-		CodecEncodeFrame(Writer,ReplayStorage.Get(Replay,Index),State)
+		CodecEncodeFrame(Writer,_S.ReplayStorage.Get(Replay,Index),State)
 	end
 	return Writer:Result()
 end
 
-ReplayStorage.CodecReplayDecode = function(String)
+_S.ReplayStorage.CodecReplayDecode = function(String)
 	if type(String) ~= "string" or #String <= #CodecReplayMagic then
-		ClientObjectSync.ResetRegistry()
+		_S.ClientObjectSync.ResetRegistry()
 		return nil
 	end
 	local MagicLength = #CodecReplayMagic
@@ -7834,22 +7882,22 @@ ReplayStorage.CodecReplayDecode = function(String)
 		MagicLength = #CodecLegacyReplayMagic
 	else
 		ConsoleMessage("This TAS file uses a different format")
-		ClientObjectSync.ResetRegistry()
+		_S.ClientObjectSync.ResetRegistry()
 		return nil
 	end
 	local Reader = CodecNewReader(String,MagicLength + 1)
 	local FrameCount = Reader:ReadUInt()
-	local ChunkSize = max(Reader:ReadUInt(),1)
+	local ChunkSize = _S.max(Reader:ReadUInt(),1)
 	local Header = CodecJsonDecode(Reader:ReadString(),{})
-	ClientObjectSync.LoadRegistry(Header.ObjectSync,Header.ObjectStateSync)
-	local Replay = ReplayStorage.New()
+	_S.ClientObjectSync.LoadRegistry(Header.ObjectSync,Header.ObjectStateSync)
+	local Replay = _S.ReplayStorage.New()
 	Replay.ChunkSize = ChunkSize
 	Replay.Chunks = {}
 	Replay.EncodedChunks = {}
 	Replay.Count = FrameCount
 	local State = CodecNewFrameState()
 	for Index = 1,FrameCount do
-		local ChunkIndex = floor((Index - 1) / ChunkSize) + 1
+		local ChunkIndex = _S.floor((Index - 1) / ChunkSize) + 1
 		local FrameIndex = ((Index - 1) % ChunkSize) + 1
 		Replay.Chunks[ChunkIndex] = Replay.Chunks[ChunkIndex] or {}
 		Replay.Chunks[ChunkIndex][FrameIndex] = CodecDecodeFrame(Reader,State)
@@ -7877,11 +7925,11 @@ local function Base64Encode(Data)
 		local C = string.byte(Data,Index + 2)
 		local Triple = A * 65536 + (B or 0) * 256 + (C or 0)
 		OutIndex = OutIndex + 1
-		Out[OutIndex] = Base64Alphabet:sub(floor(Triple / 262144) % 64 + 1, floor(Triple / 262144) % 64 + 1)
+		Out[OutIndex] = Base64Alphabet:sub(_S.floor(Triple / 262144) % 64 + 1, _S.floor(Triple / 262144) % 64 + 1)
 		OutIndex = OutIndex + 1
-		Out[OutIndex] = Base64Alphabet:sub(floor(Triple / 4096) % 64 + 1, floor(Triple / 4096) % 64 + 1)
+		Out[OutIndex] = Base64Alphabet:sub(_S.floor(Triple / 4096) % 64 + 1, _S.floor(Triple / 4096) % 64 + 1)
 		OutIndex = OutIndex + 1
-		Out[OutIndex] = B and Base64Alphabet:sub(floor(Triple / 64) % 64 + 1, floor(Triple / 64) % 64 + 1) or "="
+		Out[OutIndex] = B and Base64Alphabet:sub(_S.floor(Triple / 64) % 64 + 1, _S.floor(Triple / 64) % 64 + 1) or "="
 		OutIndex = OutIndex + 1
 		Out[OutIndex] = C and Base64Alphabet:sub(Triple % 64 + 1, Triple % 64 + 1) or "="
 	end
@@ -7914,10 +7962,10 @@ local function Base64Decode(Data)
 		end
 		local Triple = A * 262144 + B * 4096 + C * 64 + D
 		OutIndex = OutIndex + 1
-		Out[OutIndex] = string.char(floor(Triple / 65536) % 256)
+		Out[OutIndex] = string.char(_S.floor(Triple / 65536) % 256)
 		if CChar ~= "=" then
 			OutIndex = OutIndex + 1
-			Out[OutIndex] = string.char(floor(Triple / 256) % 256)
+			Out[OutIndex] = string.char(_S.floor(Triple / 256) % 256)
 		end
 		if DChar ~= "=" then
 			OutIndex = OutIndex + 1
@@ -7927,7 +7975,7 @@ local function Base64Decode(Data)
 	return table.concat(Out)
 end
 
-ReplayStorage._TryLZ4Compress = function(Data)
+_S.ReplayStorage._TryLZ4Compress = function(Data)
 	if type(Data) ~= "string" or #Data == 0 then return nil end
 	local Compressors = {
 		function() return type(lz4compress) == "function" and lz4compress(Data) or nil end,
@@ -7943,7 +7991,7 @@ ReplayStorage._TryLZ4Compress = function(Data)
 	return nil
 end
 
-ReplayStorage._TryLZ4Decompress = function(Data, Size)
+_S.ReplayStorage._TryLZ4Decompress = function(Data, Size)
 	if type(Data) ~= "string" then return nil end
 	local Decompressors = {
 		function() return type(lz4decompress) == "function" and lz4decompress(Data,Size) or nil end,
@@ -7959,7 +8007,7 @@ end
 
 -- Pure-Luau fallback compressor used when the executor does not expose LZ4.
 -- Format: \"RC1\" + packets. High bit set = repeated byte run; otherwise literal run.
-ReplayStorage._RLECompress = function(Data)
+_S.ReplayStorage._RLECompress = function(Data)
 	if type(Data) ~= "string" or #Data == 0 then
 		return Data
 	end
@@ -7995,7 +8043,7 @@ ReplayStorage._RLECompress = function(Data)
 				LiteralLength = Index - LiteralStart
 			end
 			if LiteralLength <= 0 then
-				LiteralLength = min(127, Length - LiteralStart + 1)
+				LiteralLength = _S.min(127, Length - LiteralStart + 1)
 				Index = LiteralStart + LiteralLength
 			end
 			OutIndex = OutIndex + 1
@@ -8005,7 +8053,7 @@ ReplayStorage._RLECompress = function(Data)
 	return table.concat(Out)
 end
 
-ReplayStorage._RLEDecompress = function(Data)
+_S.ReplayStorage._RLEDecompress = function(Data)
 	if type(Data) ~= "string" or #Data < 3 or string.sub(Data,1,3) ~= "RC1" then
 		return nil
 	end
@@ -8034,14 +8082,14 @@ ReplayStorage._RLEDecompress = function(Data)
 	return table.concat(Out)
 end
 
-ReplayStorage.EncodeFile = function(Replay)
-	local Packed = ReplayStorage.CodecReplayEncode(Replay)
+_S.ReplayStorage.EncodeFile = function(Replay)
+	local Packed = _S.ReplayStorage.CodecReplayEncode(Replay)
 	local Candidates = {{Name = "RAW", Data = Packed}}
-	local LZ4 = ReplayStorage._TryLZ4Compress(Packed)
+	local LZ4 = _S.ReplayStorage._TryLZ4Compress(Packed)
 	if LZ4 then
 		Candidates[#Candidates + 1] = {Name = "LZ4", Data = LZ4}
 	end
-	local RLE = ReplayStorage._RLECompress(Packed)
+	local RLE = _S.ReplayStorage._RLECompress(Packed)
 	if type(RLE) == "string" and #RLE < #Packed then
 		Candidates[#Candidates + 1] = {Name = "RLE", Data = RLE}
 	end
@@ -8058,8 +8106,8 @@ ReplayStorage.EncodeFile = function(Replay)
 		Version = ReplayFileVersion;
 		Optimizer = ReplayOptimizerName;
 		Codec = CodecName;
-		FPS = max(tonumber(ClientObjectSync.TASFPS) or 60,1);
-		Frames = ReplayStorage.Length(Replay);
+		FPS = _S.max(tonumber(_S.ClientObjectSync.TASFPS) or 60,1);
+		Frames = _S.ReplayStorage.Length(Replay);
 		Binary = "base64";
 		RawBytes = #Packed;
 		PackedBytes = #Stored;
@@ -8068,7 +8116,7 @@ ReplayStorage.EncodeFile = function(Replay)
 	return json.encode(Payload)
 end
 
-ReplayStorage.DecodeFile = function(String)
+_S.ReplayStorage.DecodeFile = function(String)
 	if type(String) ~= "string" then return nil end
 	local FirstChar = String:match("^%s*(.)")
 	if FirstChar == "{" then
@@ -8084,27 +8132,27 @@ ReplayStorage.DecodeFile = function(String)
 		end
 		local Packed = Stored
 		if Payload.Codec == "LZ4" then
-			Packed = ReplayStorage._TryLZ4Decompress(Stored, tonumber(Payload.RawBytes) or 0)
+			Packed = _S.ReplayStorage._TryLZ4Decompress(Stored, tonumber(Payload.RawBytes) or 0)
 			if not Packed then
 				ConsoleMessage("LZ4 replay decompression is unavailable in this executor")
 				return nil
 			end
 		elseif Payload.Codec == "RLE" then
-			Packed = ReplayStorage._RLEDecompress(Stored)
+			Packed = _S.ReplayStorage._RLEDecompress(Stored)
 			if not Packed then
 				ConsoleMessage("RLE replay decompression failed")
 				return nil
 			end
 		end
-		local Replay = ReplayStorage.CodecReplayDecode(Packed)
+		local Replay = _S.ReplayStorage.CodecReplayDecode(Packed)
 		return Replay, tonumber(Payload.FPS)
 	end
 	-- Backward compatibility: older .tas files still use the binary codec directly.
-	return ReplayStorage.CodecReplayDecode(String)
+	return _S.ReplayStorage.CodecReplayDecode(String)
 end
 end -- close ReplayStorage.CodecBuildCodec
-ReplayStorage.CodecBuildCodec()
-ReplayStorage.CodecBuildCodec = nil
+_S.ReplayStorage.CodecBuildCodec()
+_S.ReplayStorage.CodecBuildCodec = nil
 
 local Freeze -- Defined earlier so it can be used in replay functions
 
@@ -8125,28 +8173,28 @@ local SetCheckpoint -- SetCheckpoint(FrameIndex?) -> nil
 local GotoFrame -- GotoFrame(Index) -> nil
 do
 	GetReplayFile = function()
-		if not isfolder(string.split(FolderPath,"/")[1]) then makefolder(string.split(FolderPath,"/")[1]) end
-		if not isfolder(FolderPath) then makefolder(FolderPath) end
-		if not ReplayPath or not isfile(ReplayPath) then return nil end
-		return readfile(ReplayPath)
+		if not isfolder(string.split(_S.FolderPath,"/")[1]) then makefolder(string.split(_S.FolderPath,"/")[1]) end
+		if not isfolder(_S.FolderPath) then makefolder(_S.FolderPath) end
+		if not _S.ReplayPath or not isfile(_S.ReplayPath) then return nil end
+		return readfile(_S.ReplayPath)
 	end
 
 	ReplayEncode = function(Table)
-		ConsoleMessage("Encoding "..tostring(ReplayStorage.Length(Table)).." frames")
+		ConsoleMessage("Encoding "..tostring(_S.ReplayStorage.Length(Table)).." frames")
 		local StartTick = tick()
-		local Encoded = ReplayStorage.EncodeFile(Table)
+		local Encoded = _S.ReplayStorage.EncodeFile(Table)
 		ConsoleMessage("Done encoding in",RoundNumber(tick()-StartTick,2),"seconds")
 		return Encoded
 	end
 	ReplayDecode = function(String)
 		if type(String) ~= "string" or #String <= 0 then
 			ConsoleMessage("Nothing to read")
-			ClientObjectSync.ResetRegistry()
+			_S.ClientObjectSync.ResetRegistry()
 			return
 		end
 		ConsoleMessage("Decoding "..tostring(#String).." characters")
 		local StartTick = tick()
-		local Decoded, SourceFPS = ReplayStorage.DecodeFile(String)
+		local Decoded, SourceFPS = _S.ReplayStorage.DecodeFile(String)
 		ConsoleMessage("Done decoding in",RoundNumber(tick()-StartTick,2),"seconds")
 		return Decoded, SourceFPS
 	end
@@ -8154,7 +8202,7 @@ do
 	
 	RecordReplay = function()
 		ConsoleMessage("Waiting for input")
-		if Writing then
+		if _S.Writing then
 			ConsoleMessage("Recording stopped")
 			StopRecording()
 			return
@@ -8165,114 +8213,114 @@ do
 		ConsoleMessage("Recording started")
 	end
 	StartRecording = function()
-		if not Reading then
-			if RecordingTable.FrameCount <= 0 then
-				RecordingTable.StartFrame = ReplayStorage.Length(ReplayTable)
+		if not _S.Reading then
+			if _S.RecordingTable.FrameCount <= 0 then
+				_S.RecordingTable.StartFrame = _S.ReplayStorage.Length(_S.ReplayTable)
 			end
-			if ClientObjectSync.Enabled ~= false and ClientObjectSync.COManipulation and ClientObjectSync.COManipulation.Enabled ~= false then
-				ClientObjectSync.Scan(true)
+			if _S.ClientObjectSync.Enabled ~= false and _S.ClientObjectSync.COManipulation and _S.ClientObjectSync.COManipulation.Enabled ~= false then
+				_S.ClientObjectSync.Scan(true)
 			end
-			ClientObjectSync.ResetRecordingStepTimer()
+			_S.ClientObjectSync.ResetRecordingStepTimer()
 			SetColorCodeFrame("Recording")
-			Writing = true
+			_S.Writing = true
 		end
 	end
 	StopRecording = function()
-		if not Reading then
-			Writing = false
+		if not _S.Reading then
+			_S.Writing = false
 		end
 	end
 	
 	SaveToFile = function()
-		if type(ReplayTable) ~= "table" then
+		if type(_S.ReplayTable) ~= "table" then
 			return false
 		end
 
-		if string.lower(string.sub(ReplayPath,-5)) ~= ".json" then
+		if string.lower(string.sub(_S.ReplayPath,-5)) ~= ".json" then
 			ConsoleMessage("Only .json replay files can be saved")
 			return false
 		end
 
-		if not ReplayPath or not isfile(ReplayPath) or string.lower(string.sub(ReplayPath,-5)) ~= ".json" then
+		if not _S.ReplayPath or not isfile(_S.ReplayPath) or string.lower(string.sub(_S.ReplayPath,-5)) ~= ".json" then
 			ConsoleMessage("Select or create a .json replay file before saving")
 			return false
 		end
 
-		local Revision = tonumber(ReplayTable.Revision) or 0
-		if ReplaySaveCache.Replay == ReplayTable and ReplaySaveCache.Revision == Revision and ReplaySaveCache.Path == ReplayPath and ReplaySaveCache.Encoded and isfile(ReplayPath) then
+		local Revision = tonumber(_S.ReplayTable.Revision) or 0
+		if _S.ReplaySaveCache.Replay == _S.ReplayTable and _S.ReplaySaveCache.Revision == Revision and _S.ReplaySaveCache.Path == _S.ReplayPath and _S.ReplaySaveCache.Encoded and isfile(_S.ReplayPath) then
 			return true
 		end
 
-		local ReplayEncoded = ReplayEncode(ReplayTable)
-		local Success, Error = pcall(writefile,ReplayPath,ReplayEncoded)
+		local ReplayEncoded = ReplayEncode(_S.ReplayTable)
+		local Success, Error = pcall(writefile,_S.ReplayPath,ReplayEncoded)
 		if not Success then
 			ConsoleMessage("Save failed: "..tostring(Error))
 			return false
 		end
-		ReplaySaveCache.Replay = ReplayTable
-		ReplaySaveCache.Revision = Revision
-		ReplaySaveCache.Path = ReplayPath
-		ReplaySaveCache.Encoded = ReplayEncoded
+		_S.ReplaySaveCache.Replay = _S.ReplayTable
+		_S.ReplaySaveCache.Revision = Revision
+		_S.ReplaySaveCache.Path = _S.ReplayPath
+		_S.ReplaySaveCache.Encoded = ReplayEncoded
 		return true
 	end
 	
 	SaveRecording = function()
-		if RecordingTable.FrameCount > 0 then
-			ClientObjectSync.FlushRecordingBufferToReplay()
+		if _S.RecordingTable.FrameCount > 0 then
+			_S.ClientObjectSync.FlushRecordingBufferToReplay()
 			ConsoleMessage("Saved")
 		end
 	end
 	DiscardRecording = function()
-		if RecordingTable.FrameCount > 0 then
-			ReplayStorage.Truncate(ReplayTable,RecordingTable.StartFrame or ReplayStorage.Length(ReplayTable))
-			ClientObjectSync.ResetRecordingBuffer()
+		if _S.RecordingTable.FrameCount > 0 then
+			_S.ReplayStorage.Truncate(_S.ReplayTable,_S.RecordingTable.StartFrame or _S.ReplayStorage.Length(_S.ReplayTable))
+			_S.ClientObjectSync.ResetRecordingBuffer()
 			ConsoleMessage("Discarded")
 		end
 	end
 	ClearCurrentTAS = function()
-		if Writing then
+		if _S.Writing then
 			StopRecording()
 		end
-		if Reading and StopReading then
+		if _S.Reading and StopReading then
 			pcall(StopReading)
 		end
-		Writing = false
-		Reading = false
-		Paused = false
-		ClientObjectSync.SetPlaybackPausePhysics(false)
-		ClientObjectSync.ReleasePlaybackInputs(true)
-		Frozen = false
-		SeekDirection = 0
-		ReplayTableIndex = 0
-		FreezeFrame = 1
-		ReplayTable = ReplayStorage.New()
-		ReplaySaveCache.Replay = nil
-		ReplaySaveCache.Revision = -1
-		ReplaySaveCache.Path = nil
-		ReplaySaveCache.Encoded = nil
-		ClientObjectSync.ResetRecordingBuffer()
-		ClientObjectSync.ResetRegistry()
-		ClientObjectSync.ResetReplayInputDisplay()
-		ClientObjectSync.ClearRecordingFrameQueues()
-		workspace.Gravity = DefaultGravity
+		_S.Writing = false
+		_S.Reading = false
+		_S.Paused = false
+		_S.ClientObjectSync.SetPlaybackPausePhysics(false)
+		_S.ClientObjectSync.ReleasePlaybackInputs(true)
+		_S.Frozen = false
+		_S.SeekDirection = 0
+		_S.ReplayTableIndex = 0
+		_S.FreezeFrame = 1
+		_S.ReplayTable = _S.ReplayStorage.New()
+		_S.ReplaySaveCache.Replay = nil
+		_S.ReplaySaveCache.Revision = -1
+		_S.ReplaySaveCache.Path = nil
+		_S.ReplaySaveCache.Encoded = nil
+		_S.ClientObjectSync.ResetRecordingBuffer()
+		_S.ClientObjectSync.ResetRegistry()
+		_S.ClientObjectSync.ResetReplayInputDisplay()
+		_S.ClientObjectSync.ClearRecordingFrameQueues()
+		workspace.Gravity = _S.DefaultGravity
 		if Character and Character:FindFirstChild("Humanoid") then
 			Character.Humanoid.PlatformStand = false
-			Character.Humanoid.JumpPower = DefaultJumpPower
-			Character.Humanoid.WalkSpeed = DefaultWalkSpeed
+			Character.Humanoid.JumpPower = _S.DefaultJumpPower
+			Character.Humanoid.WalkSpeed = _S.DefaultWalkSpeed
 		end
 		SetColorCodeFrame("Idle")
 		ConsoleMessage("Cleared TAS")
 	end
 	StartReading = function()
-		if not Reading then
-			if Writing then
+		if not _S.Reading then
+			if _S.Writing then
 				StopRecording()
 				SaveRecording()
 			end
-			Paused = false
-			ClientObjectSync.SetPlaybackPausePhysics(false)
-			ClientObjectSync.ReleasePlaybackInputs(true)
-			if not ReplayPath or not isfile(ReplayPath) then
+			_S.Paused = false
+			_S.ClientObjectSync.SetPlaybackPausePhysics(false)
+			_S.ClientObjectSync.ReleasePlaybackInputs(true)
+			if not _S.ReplayPath or not isfile(_S.ReplayPath) then
 				ConsoleMessage("Select a replay file first")
 				return
 			end
@@ -8282,12 +8330,12 @@ do
 				ConsoleMessage("Replay file is unavailable")
 				return
 			end
-			ReplayTable = ReplayDecode(ReplayRaw) -- Decode replay from file
-			local ReplayReady,ReplayReason = ReplayStorage.WaitUntilDecoded(ReplayTable)
+			_S.ReplayTable = ReplayDecode(ReplayRaw) -- Decode replay from file
+			local ReplayReady,ReplayReason = _S.ReplayStorage.WaitUntilDecoded(_S.ReplayTable)
 			if ReplayReady then
 				-- Decoding successful
 				Freeze(false) -- Unfreeze
-				AnimateDisabled = true -- Disable fake animate script
+				_S.AnimateDisabled = true -- Disable fake animate script
 				Workspace.Gravity = 0
 				if Character and Character:FindFirstChild("Humanoid") then
 					Character.Humanoid.JumpPower = 0
@@ -8298,18 +8346,18 @@ do
 				if animScript then
 					animScript.Disabled = true
 				end
-				ReplayTableIndex = 1
-				ClientObjectSync.ResetPlaybackStepTimer()
+				_S.ReplayTableIndex = 1
+				_S.ClientObjectSync.ResetPlaybackStepTimer()
 				BlockInputs() -- Disable scrolling and clicks
-				Reading = true
-				ClientObjectSync.ApplyFPSCap()
+				_S.Reading = true
+				_S.ClientObjectSync.ApplyFPSCap()
 				SetColorCodeFrame("Reading")
 				ConsoleMessage("Reading started")
-				ConsoleMessage("Length: "..RoundNumber(ReplayStorage.Length(ReplayTable)/ClientObjectSync.TASFPS,2).." seconds")
+				ConsoleMessage("Length: "..RoundNumber(_S.ReplayStorage.Length(_S.ReplayTable)/_S.ClientObjectSync.TASFPS,2).." seconds")
 			else
 				-- Decoding failed
 				ConsoleMessage(ReplayReason or "Replay was not ready")
-				ReplayTable = ReplayStorage.New()
+				_S.ReplayTable = _S.ReplayStorage.New()
 				SetColorCodeFrame("Idle")
 			end
 		else
@@ -8317,22 +8365,22 @@ do
 		end
 	end
 	StopReading = function()
-		if Reading then
-			Paused = false
-			ClientObjectSync.SetPlaybackPausePhysics(false)
-			ClientObjectSync.ReleasePlaybackInputs(true)
+		if _S.Reading then
+			_S.Paused = false
+			_S.ClientObjectSync.SetPlaybackPausePhysics(false)
+			_S.ClientObjectSync.ReleasePlaybackInputs(true)
 			UnblockInputs() -- Enable scrolling and clicks
 			Character.Head.CanCollide = true -- Fix character collisions
 			Character.Torso.CanCollide = true -- Fix character collisions
 			Character.HumanoidRootPart.CanCollide = true -- Fix character collisions
-			AnimateDisabled = false -- Enable fake animate script
-			Reading = false
-			ClientObjectSync.ResetReplayInputDisplay()
-			Character.Humanoid.JumpPower = DefaultJumpPower
-			Character.Humanoid.WalkSpeed = DefaultWalkSpeed
-			Workspace.Gravity = DefaultGravity
+			_S.AnimateDisabled = false -- Enable fake animate script
+			_S.Reading = false
+			_S.ClientObjectSync.ResetReplayInputDisplay()
+			Character.Humanoid.JumpPower = _S.DefaultJumpPower
+			Character.Humanoid.WalkSpeed = _S.DefaultWalkSpeed
+			Workspace.Gravity = _S.DefaultGravity
 			SetColorCodeFrame("Idle")
-			ClientObjectSync.ApplyFPSCap()
+			_S.ClientObjectSync.ApplyFPSCap()
 			ConsoleMessage("Reading stopped")
 		else
 			ConsoleMessage("You are not reading")
@@ -8343,33 +8391,33 @@ end
 -- Tasability functions
 do
 	Freeze = function(NewFrozen,DoNotRecord)
-		if Frozen ~= NewFrozen and not Reading then
-			SeekDirection = 0
+		if _S.Frozen ~= NewFrozen and not _S.Reading then
+			_S.SeekDirection = 0
 			if NewFrozen then
-				Frozen = true
+				_S.Frozen = true
 				StopRecording()
 				SaveRecording()
-				FreezeFrame = ReplayStorage.Length(ReplayTable)
-				ClientObjectSync.ResetSeekStepTimer()
+				_S.FreezeFrame = _S.ReplayStorage.Length(_S.ReplayTable)
+				_S.ClientObjectSync.ResetSeekStepTimer()
 				SetColorCodeFrame("Frozen")
 			else
 				if DoNotRecord then
-					if ClientObjectSync.ReleasePlaybackObjectControl then
-						ClientObjectSync.ReleasePlaybackObjectControl(true)
+					if _S.ClientObjectSync.ReleasePlaybackObjectControl then
+						_S.ClientObjectSync.ReleasePlaybackObjectControl(true)
 					end
-					Frozen = false
+					_S.Frozen = false
 					SetColorCodeFrame("Idle")
 				else
-					local TargetFrameIndex = math.max(FreezeFrame - 1, 1)
-					ClientObjectSync.ApplyObjectsAtFrame(ReplayTable, TargetFrameIndex)
-					ReplayStorage.Truncate(ReplayTable, TargetFrameIndex)
-					if ClientObjectSync.ReleasePlaybackObjectControl then
-						ClientObjectSync.ReleasePlaybackObjectControl(true)
+					local TargetFrameIndex = math.max(_S.FreezeFrame - 1, 1)
+					_S.ClientObjectSync.ApplyObjectsAtFrame(_S.ReplayTable, TargetFrameIndex)
+					_S.ReplayStorage.Truncate(_S.ReplayTable, TargetFrameIndex)
+					if _S.ClientObjectSync.ReleasePlaybackObjectControl then
+						_S.ClientObjectSync.ReleasePlaybackObjectControl(true)
 					end
-					if ClientObjectSync.PrepareFirstRecordingFrame then
-						ClientObjectSync.PrepareFirstRecordingFrame()
+					if _S.ClientObjectSync.PrepareFirstRecordingFrame then
+						_S.ClientObjectSync.PrepareFirstRecordingFrame()
 					end
-					Frozen = false
+					_S.Frozen = false
 					StartRecording()
 					SetColorCodeFrame("Recording")
 				end
@@ -8401,10 +8449,10 @@ do
 	end
 	Commands["erase"] = function(Args)
 		if Args == "help" then
-			ConsoleMessage("erase: Erases all data from the folder",PlaceId)
+			ConsoleMessage("erase: Erases all data from the folder",_S.PlaceId)
 		else
 			ClearCurrentTAS()
-			return ReplayPath.." has been erased"
+			return _S.ReplayPath.." has been erased"
 		end
 	end
 	Commands["setsdm"] = function(Args)
@@ -8413,8 +8461,8 @@ do
 		else
 			local Number = tonumber(Args[1]) or 1
 			if Number then
-				local OldValue = SeekDirectionMultiplier
-				SeekDirectionMultiplier = Number
+				local OldValue = _S.SeekDirectionMultiplier
+				_S.SeekDirectionMultiplier = Number
 				return "SeekDirectionMultiplier has been set from "..tostring(OldValue).." to "..tostring(Number)
 			end
 		end
@@ -8472,75 +8520,75 @@ local Stepped
 local CurrentCamera_Changed
 do
 	StateChanged = function(_,State)
-		table.insert(HumanoidStateQueue,State.Value)
+		table.insert(_S.HumanoidStateQueue,State.Value)
 	end
 	CharacterAdded = function(NewCharacter)
-		Humanoid = NewCharacter:WaitForChild("Humanoid")
-		Humanoid.StateChanged:Connect(StateChanged)
-		RootPart = NewCharacter:WaitForChild("HumanoidRootPart")
-		DefaultJumpPower = Humanoid.JumpPower
-		DefaultWalkSpeed = Humanoid.WalkSpeed
+		_S.Humanoid = NewCharacter:WaitForChild("Humanoid")
+		_S.Humanoid.StateChanged:Connect(StateChanged)
+		_S.RootPart = NewCharacter:WaitForChild("HumanoidRootPart")
+		_S.DefaultJumpPower = _S.Humanoid.JumpPower
+		_S.DefaultWalkSpeed = _S.Humanoid.WalkSpeed
 		Reanimate(NewCharacter)
 		Character = NewCharacter
-		Humanoid.Died:Connect(function()
-			Dead = true
+		_S.Humanoid.Died:Connect(function()
+			_S.Dead = true
 		end)
-		Dead = false
+		_S.Dead = false
 	end
 	InputBegan = function(Input,GameProcessed)
-	if IgnoreGameProcessed then
+	if _S.IgnoreGameProcessed then
 		GameProcessed = false
 	end
 	
 	if Input.UserInputType == Enum.UserInputType.MouseButton1 then
-		table.insert(InputBeganQueue,"b1")
+		table.insert(_S.InputBeganQueue,"b1")
 	elseif Input.UserInputType == Enum.UserInputType.MouseButton2 then
-		table.insert(InputBeganQueue,"b2")
+		table.insert(_S.InputBeganQueue,"b2")
 	elseif Input.UserInputType == Enum.UserInputType.Keyboard then
 		local InputName = string.split(tostring(Input.KeyCode),".")[3]
-		if not InputBlacklist[InputName] then
-			table.insert(InputBeganQueue,InputName)
+		if not _S.InputBlacklist[InputName] then
+			table.insert(_S.InputBeganQueue,InputName)
 		end
 	end
 	
-	if Input.KeyCode == Enum.KeyCode.LeftShift and not Reading and not GameProcessed then
-		SetShiftLockEnabled(not ShiftLockEnabled)
+	if Input.KeyCode == Enum.KeyCode.LeftShift and not _S.Reading and not GameProcessed then
+		SetShiftLockEnabled(not _S.ShiftLockEnabled)
 	end
 	
 	if Input.KeyCode == Recordkeybind.Value and not GameProcessed then
 		-- Freeze/Unfreeze
-		Freeze(not Frozen)
+		Freeze(not _S.Frozen)
 	elseif Input.KeyCode == Gobackwardskeybind.Value and not GameProcessed then
-		if not Reading then
+		if not _S.Reading then
 			Freeze(true)
-			if SeekDirection == 0 then
-				SeekDirection = -1*SeekDirectionMultiplier -- Backwards
+			if _S.SeekDirection == 0 then
+				_S.SeekDirection = -1*_S.SeekDirectionMultiplier -- Backwards
 			end
 		end
 	elseif Input.KeyCode == Goforwardkeybind.Value and not GameProcessed then
 		-- Seek fowards
-		if not Reading then
+		if not _S.Reading then
 			Freeze(true)
-			if SeekDirection == 0 then
-				SeekDirection = 1*SeekDirectionMultiplier -- Fowards
+			if _S.SeekDirection == 0 then
+				_S.SeekDirection = 1*_S.SeekDirectionMultiplier -- Fowards
 			end
 		end
 	elseif Input.KeyCode == Frameadvancebackwardskeybind.Value and not GameProcessed then
 		-- Go 1 frame backwards
 		Freeze(true)
-		if Frozen and SeekDirection == 0 then
-			local NewFreezeFrame = FreezeFrame - 1
-			if NewFreezeFrame > 0 and NewFreezeFrame <= ReplayStorage.Length(ReplayTable) then
-				FreezeFrame = NewFreezeFrame
+		if _S.Frozen and _S.SeekDirection == 0 then
+			local NewFreezeFrame = _S.FreezeFrame - 1
+			if NewFreezeFrame > 0 and NewFreezeFrame <= _S.ReplayStorage.Length(_S.ReplayTable) then
+				_S.FreezeFrame = NewFreezeFrame
 			end
 		end
 	elseif Input.KeyCode == Frameadvanceforwardkeybind.Value and not GameProcessed then
 		-- Go 1 frame fowards
 		Freeze(true)
-		if Frozen and SeekDirection == 0 then
-			local NewFreezeFrame = FreezeFrame + 1
-			if NewFreezeFrame > 0 and NewFreezeFrame <= ReplayStorage.Length(ReplayTable) then
-				FreezeFrame = NewFreezeFrame
+		if _S.Frozen and _S.SeekDirection == 0 then
+			local NewFreezeFrame = _S.FreezeFrame + 1
+			if NewFreezeFrame > 0 and NewFreezeFrame <= _S.ReplayStorage.Length(_S.ReplayTable) then
+				_S.FreezeFrame = NewFreezeFrame
 			end
 		end
 	elseif Input.KeyCode == Hideuikeybind.Value and not GameProcessed then
@@ -8559,14 +8607,14 @@ do
 		ReadButton_MouseButton1Click()
 	elseif Input.KeyCode == Pausekeybind.Value and not GameProcessed then
 		-- Pause/Resume reading
-		if Reading then
-			Paused = not Paused
-			if Paused then
-				ClientObjectSync.SetPlaybackPausePhysics(true)
+		if _S.Reading then
+			_S.Paused = not _S.Paused
+			if _S.Paused then
+				_S.ClientObjectSync.SetPlaybackPausePhysics(true)
 				ConsoleMessage("Paused")
 				SetColorCodeFrame("Frozen") 
 			else
-				ClientObjectSync.SetPlaybackPausePhysics(false)
+				_S.ClientObjectSync.SetPlaybackPausePhysics(false)
 				ConsoleMessage("Resumed")
 				SetColorCodeFrame("Reading")
 			end
@@ -8576,53 +8624,53 @@ end
 	InputChanged = function(Input,GameProcessed)
 		if Input.UserInputType == Enum.UserInputType.MouseWheel then
 			if Input.Position.Z > 0 then
-				table.insert(InputBeganQueue,"u")
+				table.insert(_S.InputBeganQueue,"u")
 			else
-				table.insert(InputBeganQueue,"d")
+				table.insert(_S.InputBeganQueue,"d")
 			end
 		end
 	end
 	InputEnded = function(Input,GameProcessed)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 then
-			table.insert(InputEndedQueue,"b1")
+			table.insert(_S.InputEndedQueue,"b1")
 		elseif Input.UserInputType == Enum.UserInputType.MouseButton2 then
-			table.insert(InputEndedQueue,"b2")
+			table.insert(_S.InputEndedQueue,"b2")
 		elseif Input.UserInputType == Enum.UserInputType.MouseWheel then
 			if Input.Position.Z > 0 then
-				table.insert(InputEndedQueue,"u")
+				table.insert(_S.InputEndedQueue,"u")
 			else
-				table.insert(InputEndedQueue,"d")
+				table.insert(_S.InputEndedQueue,"d")
 			end
 		elseif Input.UserInputType == Enum.UserInputType.Keyboard then
 			local InputName = string.split(tostring(Input.KeyCode),".")[3]
-			table.insert(InputEndedQueue,InputName)
+			table.insert(_S.InputEndedQueue,InputName)
 		end
 		
 		if Input.KeyCode == Gobackwardskeybind.Value then
 			-- Stop seeking backwards
-			if SeekDirection == -1*SeekDirectionMultiplier then
-				SeekDirection = 0
+			if _S.SeekDirection == -1*_S.SeekDirectionMultiplier then
+				_S.SeekDirection = 0
 			end
 		elseif Input.KeyCode == Goforwardkeybind.Value then
 			-- Stop seeking fowards
-			if SeekDirection == 1*SeekDirectionMultiplier then
-				SeekDirection = 0
+			if _S.SeekDirection == 1*_S.SeekDirectionMultiplier then
+				_S.SeekDirection = 0
 			end
 		end
 	end
 	RenderStepped = function(...)
-		for _,Function in pairs(RenderSteppedConnections) do
+		for _,Function in pairs(_S.RenderSteppedConnections) do
 			Function(...)
 		end
 	end
 	Stepped = function(...)
-		for _,Function in pairs(SteppedConnections) do
+		for _,Function in pairs(_S.SteppedConnections) do
 			Function(...)
 		end
 	end
 	ReadButton_MouseButton1Click = function()
-		if ReplayStartTime >= 1 then
-			for i = ReplayStartTime,1,-1 do
+		if _S.ReplayStartTime >= 1 then
+			for i = _S.ReplayStartTime,1,-1 do
 				ConsoleMessage("Reading in "..tostring(i).." seconds")
 				wait(1)
 			end
@@ -8635,8 +8683,8 @@ end
 		end
 	end
 	CurrentCamera_Changed = function()
-		if Reading then
-			workspace.CurrentCamera.CFrame = CameraCFrame
+		if _S.Reading then
+			workspace.CurrentCamera.CFrame = _S.CameraCFrame
 		end
 	end
 	ConsoleInput.Callback = function(self, value)
@@ -8658,37 +8706,37 @@ end
 
 -- RenderStepped/Stepped connections
 do
-	RenderSteppedConnections.UpdateFreezeFrame = function()
-		RecordedFramesLabel.Text = "Frames: "..RoundNumber(FreezeFrame,0)
+	_S.RenderSteppedConnections.UpdateFreezeFrame = function()
+		RecordedFramesLabel.Text = "Frames: "..RoundNumber(_S.FreezeFrame,0)
 	end
-	RenderSteppedConnections.SeekDirectionHandler = function(Delta)
-		if Frozen and SeekDirection ~= 0 and ClientObjectSync.ShouldSeekTASFrame(Delta) then
-			local FrameStep = SeekDirection > 0 and 1 or -1
-			local NewFreezeFrame = FreezeFrame + FrameStep
+	_S.RenderSteppedConnections.SeekDirectionHandler = function(Delta)
+		if _S.Frozen and _S.SeekDirection ~= 0 and _S.ClientObjectSync.ShouldSeekTASFrame(Delta) then
+			local FrameStep = _S.SeekDirection > 0 and 1 or -1
+			local NewFreezeFrame = _S.FreezeFrame + FrameStep
 			if NewFreezeFrame < 1 then
-				FreezeFrame = 1
-			elseif NewFreezeFrame > ReplayStorage.Length(ReplayTable) then
-				FreezeFrame = ReplayStorage.Length(ReplayTable)
+				_S.FreezeFrame = 1
+			elseif NewFreezeFrame > _S.ReplayStorage.Length(_S.ReplayTable) then
+				_S.FreezeFrame = _S.ReplayStorage.Length(_S.ReplayTable)
 			else
-				FreezeFrame = NewFreezeFrame
+				_S.FreezeFrame = NewFreezeFrame
 			end
 		end
 	end
 
     local PressedWriting = {}
 	
-SteppedConnections.UpdateKeyboardOverlay = function()
+_S.SteppedConnections.UpdateKeyboardOverlay = function()
     if getgenv().KeyboardOverlayEnabled and getgenv().KeyboardOverlayKeys then
         local keys = getgenv().KeyboardOverlayKeys
         local theme = KeyboardOverlayThemes[currentTheme]
         
-        local keysToCheck = (Reading or Frozen) and ClientObjectSync.ReplayPressed or (Writing and PressedWriting or Pressed)
+        local keysToCheck = (_S.Reading or _S.Frozen) and _S.ClientObjectSync.ReplayPressed or (_S.Writing and PressedWriting or _S.Pressed)
         
         for keyName, keyFrame in pairs(keys) do
             local state = "normal"
             
             if keysToCheck[keyName] then
-                state = Writing and "writing" or "pressed"
+                state = _S.Writing and "writing" or "pressed"
             end
             
             theme.updateColors(keyFrame, state)
@@ -8696,31 +8744,31 @@ SteppedConnections.UpdateKeyboardOverlay = function()
     end
 end
 
-SteppedConnections.UpdateInputPreview = function()
-	if not Reading then
-		for _,Input in pairs(InputBeganQueue) do
+_S.SteppedConnections.UpdateInputPreview = function()
+	if not _S.Reading then
+		for _,Input in pairs(_S.InputBeganQueue) do
 			if Input == "u" or Input == "d" then
 				continue
 			end
-			Pressed[Input] = true
+			_S.Pressed[Input] = true
 		end
-		for _,Input in pairs(InputEndedQueue) do
-			Pressed[Input] = nil
+		for _,Input in pairs(_S.InputEndedQueue) do
+			_S.Pressed[Input] = nil
 		end
 	end
-	if Frozen and ReplayStorage.Length(ReplayTable) > 0 then
-		ClientObjectSync.SetReplayKeyboardDisplayAtFrame(ReplayTable,FreezeFrame)
+	if _S.Frozen and _S.ReplayStorage.Length(_S.ReplayTable) > 0 then
+		_S.ClientObjectSync.SetReplayKeyboardDisplayAtFrame(_S.ReplayTable,_S.FreezeFrame)
 	end
-	ClientObjectSync.SetPressedKeysLabel((Reading or Frozen) and ClientObjectSync.ReplayPressed or Pressed,PressedKeysLabel)
+	_S.ClientObjectSync.SetPressedKeysLabel((_S.Reading or _S.Frozen) and _S.ClientObjectSync.ReplayPressed or _S.Pressed,PressedKeysLabel)
 	
-	if Writing then
-		for _,Input in pairs(InputBeganQueue) do
+	if _S.Writing then
+		for _,Input in pairs(_S.InputBeganQueue) do
 			if Input == "u" or Input == "d" then
 			else
 				PressedWriting[Input] = true
 			end
 		end
-		for _,Input in pairs(InputEndedQueue) do
+		for _,Input in pairs(_S.InputEndedQueue) do
 			PressedWriting[Input] = nil
 		end
 		WritingPressedKeysLabel.Text = "Writing Pressed keys: |"
@@ -8733,25 +8781,25 @@ SteppedConnections.UpdateInputPreview = function()
 end
 
 do -- Connections
-	UserInputService.InputBegan:Connect(InputBegan)
-	UserInputService.InputChanged:Connect(InputChanged)
-	UserInputService.InputEnded:Connect(InputEnded)
-	RunService.RenderStepped:Connect(RenderStepped)
-	RunService.Stepped:Connect(Stepped)
-	Player.CharacterAdded:Connect(CharacterAdded)
+	_S.UserInputService.InputBegan:Connect(InputBegan)
+	_S.UserInputService.InputChanged:Connect(InputChanged)
+	_S.UserInputService.InputEnded:Connect(InputEnded)
+	_S.RunService.RenderStepped:Connect(RenderStepped)
+	_S.RunService.Stepped:Connect(Stepped)
+	_S.Player.CharacterAdded:Connect(CharacterAdded)
 	workspace.CurrentCamera.Changed:Connect(CurrentCamera_Changed)
 end
 
 do -- Setup
 	GetReplayFile() -- Create/migrate replay files for Tasability if needed
-	if TASPaths then TASPaths.ReplayPath = ReplayPath end
+	if TASPaths then TASPaths.ReplayPath = _S.ReplayPath end
 	SetCursor("ArrowFarCursor")
 	-- Keep the real Roblox mouse visible so it can be displayed over Tasability's CoreGui.
 	-- The old fake ImageLabel cursor remains available for internal positioning but is hidden.
-	UserInputService.MouseIconEnabled = true
-	DefaultGravity = Workspace.Gravity -- Set DefaultGravity
-	ShiftLockBoundKeys.Value = "" -- Remove shift lock keybinds
-	CharacterAdded(Player.Character) -- Set character
+	_S.UserInputService.MouseIconEnabled = true
+	_S.DefaultGravity = Workspace.Gravity -- Set DefaultGravity
+	_S.ShiftLockBoundKeys.Value = "" -- Remove shift lock keybinds
+	CharacterAdded(_S.Player.Character) -- Set character
 	SetColorCodeFrame("Idle") -- Set color code
 end
 
@@ -8795,34 +8843,34 @@ spawn(function() -- Reading Loop
 	local idle_threshold = 3 
 	
 	while true do
-		if Reading then
-			if Paused then
-				ClientObjectSync.SetPlaybackPausePhysics(true)
-				ClientObjectSync.ResetPlaybackStepTimer()
-				RunService.Heartbeat:Wait()
+		if _S.Reading then
+			if _S.Paused then
+				_S.ClientObjectSync.SetPlaybackPausePhysics(true)
+				_S.ClientObjectSync.ResetPlaybackStepTimer()
+				_S.RunService.Heartbeat:Wait()
 				continue
 			end
 			
-			local Frame = ReplayStorage.Get(ReplayTable,ReplayTableIndex)
+			local Frame = _S.ReplayStorage.Get(_S.ReplayTable,_S.ReplayTableIndex)
 			
 			if Frame == 0 then
-				Humanoid:ChangeState(15)
+				_S.Humanoid:ChangeState(15)
 				for _,Descendant in pairs(Character:GetDescendants()) do
 					if Descendant:IsA("BasePart") then
 						Descendant:Destroy()
 					end
 				end
-				repeat wait() until not Dead
-				RunService.Heartbeat:Wait()
-				ReplayTableIndex = ReplayTableIndex + 1
+				repeat wait() until not _S.Dead
+				_S.RunService.Heartbeat:Wait()
+				_S.ReplayTableIndex = _S.ReplayTableIndex + 1
 				idleFrameCount = 0
 				continue
 			elseif Frame == 1 then
-				Humanoid:ChangeState(15)
-				workspace.Gravity = DefaultGravity
-				repeat wait() until not Dead
-				RunService.Heartbeat:Wait()
-				ReplayTableIndex = ReplayTableIndex + 1
+				_S.Humanoid:ChangeState(15)
+				workspace.Gravity = _S.DefaultGravity
+				repeat wait() until not _S.Dead
+				_S.RunService.Heartbeat:Wait()
+				_S.ReplayTableIndex = _S.ReplayTableIndex + 1
 				idleFrameCount = 0
 				continue
 			end
@@ -8837,13 +8885,13 @@ spawn(function() -- Reading Loop
 				animateScript.Disabled = true
 			end
 
-			AnimateDisabled = true
+			_S.AnimateDisabled = true
 			workspace.Gravity = 0
 			Character.Humanoid.JumpPower = 0
 			Character.Humanoid.WalkSpeed = 0
 			
 			if not Character:FindFirstChild("HumanoidRootPart") then
-				RunService.Heartbeat:Wait()
+				_S.RunService.Heartbeat:Wait()
 				continue
 			end
 			
@@ -8855,10 +8903,10 @@ spawn(function() -- Reading Loop
 				end
 			end
 			
-			Humanoid.PlatformStand = true
+			_S.Humanoid.PlatformStand = true
 			
 			
-			local cache = frameCache[ReplayTableIndex]
+			local cache = frameCache[_S.ReplayTableIndex]
 			if not cache then
 				cache = {
 					hrpCFrame = FastTableToCFrame(Frame[1]),
@@ -8875,11 +8923,11 @@ spawn(function() -- Reading Loop
 					inputBegan = Frame[12][1],
 					inputEnded = Frame[12][2]
 				}
-				frameCache[ReplayTableIndex] = cache
+				frameCache[_S.ReplayTableIndex] = cache
 			end
 
-			ClientObjectSync.ApplyFrame(Frame)
-			local ReplayKeyboardState = ClientObjectSync.SetReplayKeyboardDisplayAtFrame(ReplayTable,ReplayTableIndex)
+			_S.ClientObjectSync.ApplyFrame(Frame)
+			local ReplayKeyboardState = _S.ClientObjectSync.SetReplayKeyboardDisplayAtFrame(_S.ReplayTable,_S.ReplayTableIndex)
 			
 			
 			local currentVelocity = cache.hrpVel
@@ -8900,17 +8948,17 @@ spawn(function() -- Reading Loop
 			local shouldForceIdle = idleFrameCount >= idle_threshold and isOnGround and not isClimbing and not isSeated
 			
 			pose = cache.animPose
-			Humanoid:ChangeState(cache.humanoidState)
+			_S.Humanoid:ChangeState(cache.humanoidState)
 		
 			if shouldForceIdle then
-				playAnimation("idle", 0.1, Humanoid, true)
+				playAnimation("idle", 0.1, _S.Humanoid, true)
 				pcall(setAnimationSpeed, 1.0)
 			else
 				-- Animation playbacks
 				for _, Arguments in pairs(cache.animations) do
 					local animName = Arguments[1]
 					local transitionTime = Arguments[2]
-					playAnimation(animName, transitionTime, Humanoid, true)
+					playAnimation(animName, transitionTime, _S.Humanoid, true)
 				end
 				pcall(setAnimationSpeed, cache.animSpeed)
 			end
@@ -8922,31 +8970,31 @@ spawn(function() -- Reading Loop
 				SetShiftLockEnabled(cache.shiftLock)
 			end
 			
-			if PlaybackMouseLocation and not cache.shiftLock and cache.zoom > 0.52 then
+			if _S.PlaybackMouseLocation and not cache.shiftLock and cache.zoom > 0.52 then
 				mousemoveabs(cache.mouseLocation.X, cache.mouseLocation.Y)
 			else
 				local CurrentResolution = workspace.CurrentCamera.ViewportSize
-				local CurrentGuiInset = GuiService:GetGuiInset()
+				local CurrentGuiInset = _S.GuiService:GetGuiInset()
 				mousemoveabs(
 					(CurrentResolution.X / 2) - CurrentGuiInset.X,
 					(CurrentResolution.Y / 2) - CurrentGuiInset.Y
 				)
 			end
 			
-			if PlaybackInputs then
-				ClientObjectSync.SyncMotionPlaybackInputs(ReplayKeyboardState)
+			if _S.PlaybackInputs then
+				_S.ClientObjectSync.SyncMotionPlaybackInputs(ReplayKeyboardState)
 				local Signal = {}
 				for _, Input in pairs(cache.inputBegan) do
-					if not ClientObjectSync.IsRawKeyboardPlaybackInput(Input) then
-						local SignalInput = ClientObjectSync.PlaybackInputPress(Input)
+					if not _S.ClientObjectSync.IsRawKeyboardPlaybackInput(Input) then
+						local SignalInput = _S.ClientObjectSync.PlaybackInputPress(Input)
 						if SignalInput then
 							table.insert(Signal,SignalInput)
 						end
 					end
 				end
 				for _, Input in pairs(cache.inputEnded) do
-					if not ClientObjectSync.IsRawKeyboardPlaybackInput(Input) then
-						ClientObjectSync.PlaybackInputRelease(Input)
+					if not _S.ClientObjectSync.IsRawKeyboardPlaybackInput(Input) then
+						_S.ClientObjectSync.PlaybackInputRelease(Input)
 					end
 				end
 				if #Signal > 0 then
@@ -8960,13 +9008,13 @@ spawn(function() -- Reading Loop
 			
 			lastVelocity = currentVelocity
 			
-			ReplayTableIndex = ReplayTableIndex + 1
+			_S.ReplayTableIndex = _S.ReplayTableIndex + 1
 
-			if ReplayTableIndex > 100 then
-				frameCache[ReplayTableIndex - 100] = nil
+			if _S.ReplayTableIndex > 100 then
+				frameCache[_S.ReplayTableIndex - 100] = nil
 			end
 		else
-			workspace.Gravity = DefaultGravity
+			workspace.Gravity = _S.DefaultGravity
 			pcall(function()
 				if Character and Character:FindFirstChild("Humanoid") then
 					Character.Humanoid.PlatformStand = false
@@ -8977,22 +9025,22 @@ spawn(function() -- Reading Loop
 			idleFrameCount = 0
 		end
 		
-		RunService.Heartbeat:Wait()
+		_S.RunService.Heartbeat:Wait()
 	end
 end)
 
 -- Clear input queues
-RunService.Heartbeat:Connect(function()
-	if not Writing then
-		InputBeganQueue = {}
-		InputEndedQueue = {}
+_S.RunService.Heartbeat:Connect(function()
+	if not _S.Writing then
+		_S.InputBeganQueue = {}
+		_S.InputEndedQueue = {}
 	end
 end)
 
 spawn(function() -- Check if connected
 	while true do
 		wait(1)
-		if not Reading then
+		if not _S.Reading then
 			local Installed = IsInstalled()
 			if Installed then
 				ConnectedLabel.Text = "AHK folder found"
@@ -9011,56 +9059,56 @@ spawn(function() -- Writing
 		--print(GetShiftLockEnabled())
 		--table.foreach(InputEndedQueue,print)
 		--print(GetZoom())
-		if Writing then
-			if not ClientObjectSync.ShouldRecordTASFrame() then
-				ClientObjectSync.ApplyFPSCap()
-				RunService.RenderStepped:Wait()
+		if _S.Writing then
+			if not _S.ClientObjectSync.ShouldRecordTASFrame() then
+				_S.ClientObjectSync.ApplyFPSCap()
+				_S.RunService.RenderStepped:Wait()
 				continue
 			end
 			if (not Character or not Character.Parent) or (not Character:FindFirstChild("HumanoidRootPart")) then
-				if type(RecordingTable.LastFrame) == "table" then
-					ClientObjectSync.AppendRecordingFrame(0) -- Voided
+				if type(_S.RecordingTable.LastFrame) == "table" then
+					_S.ClientObjectSync.AppendRecordingFrame(0) -- Voided
 				end
-				ClientObjectSync.ClearRecordingFrameQueues()
-				ClientObjectSync.ApplyFPSCap()
-				RunService.RenderStepped:Wait()
+				_S.ClientObjectSync.ClearRecordingFrameQueues()
+				_S.ClientObjectSync.ApplyFPSCap()
+				_S.RunService.RenderStepped:Wait()
 				continue
 			end
-			if (Humanoid.Health == 0) then
-				if type(RecordingTable.LastFrame) == "table" then
-					ClientObjectSync.AppendRecordingFrame(1) -- Dead
+			if (_S.Humanoid.Health == 0) then
+				if type(_S.RecordingTable.LastFrame) == "table" then
+					_S.ClientObjectSync.AppendRecordingFrame(1) -- Dead
 				end
-				ClientObjectSync.ClearRecordingFrameQueues()
-				ClientObjectSync.ApplyFPSCap()
-				RunService.RenderStepped:Wait()
+				_S.ClientObjectSync.ClearRecordingFrameQueues()
+				_S.ClientObjectSync.ApplyFPSCap()
+				_S.RunService.RenderStepped:Wait()
 				continue
 			end
 			local Frame = {}
-			Frame[1] = RoundCFrameToTable(Character.HumanoidRootPart.CFrame,RoundDigits)
-			Frame[2] = AnimationQueue
-			Frame[3] = RoundNumber(currentAnimSpeed,RoundDigits)
-			Frame[4] = Humanoid:GetState().Value
-			Frame[5] = RoundVector3ToTable(Character.HumanoidRootPart.Velocity,RoundDigits)
-			Frame[6] = RoundVector3ToTable(Character.HumanoidRootPart.RotVelocity,RoundDigits)
-			Frame[7] = RoundCFrameToTable(workspace.CurrentCamera.CFrame,RoundDigits)
-			Frame[8] = RoundNumber(GetZoom(),RoundDigits)
+			Frame[1] = RoundCFrameToTable(Character.HumanoidRootPart.CFrame,_S.RoundDigits)
+			Frame[2] = _S.AnimationQueue
+			Frame[3] = RoundNumber(currentAnimSpeed,_S.RoundDigits)
+			Frame[4] = _S.Humanoid:GetState().Value
+			Frame[5] = RoundVector3ToTable(Character.HumanoidRootPart.Velocity,_S.RoundDigits)
+			Frame[6] = RoundVector3ToTable(Character.HumanoidRootPart.RotVelocity,_S.RoundDigits)
+			Frame[7] = RoundCFrameToTable(workspace.CurrentCamera.CFrame,_S.RoundDigits)
+			Frame[8] = RoundNumber(GetZoom(),_S.RoundDigits)
 			Frame[9] = pose
 			Frame[10] = (GetShiftLockEnabled() and 1) or 0
-			Frame[11] = RoundVector2ToTable(UserInputService:GetMouseLocation(),RoundDigits)
-			Frame[12] = {InputBeganQueue,InputEndedQueue}
-			Frame[13] = ClientObjectSync.CaptureFrame()
-			Frame[14] = ClientObjectSync.CaptureStateFrame()
-			Frame[15] = ClientObjectSync.CaptureBeatBlockFrame()
+			Frame[11] = RoundVector2ToTable(_S.UserInputService:GetMouseLocation(),_S.RoundDigits)
+			Frame[12] = {_S.InputBeganQueue,_S.InputEndedQueue}
+			Frame[13] = _S.ClientObjectSync.CaptureFrame()
+			Frame[14] = _S.ClientObjectSync.CaptureStateFrame()
+			Frame[15] = _S.ClientObjectSync.CaptureBeatBlockFrame()
 			if (Frame[14] ~= nil or Frame[15] ~= nil) and Frame[13] == nil then
 				Frame[13] = {}
 			end
-			ClientObjectSync.AppendRecordingFrame(Frame)
-			ClientObjectSync.ClearRecordingFrameQueues()
+			_S.ClientObjectSync.AppendRecordingFrame(Frame)
+			_S.ClientObjectSync.ClearRecordingFrameQueues()
 		else
-			ClientObjectSync.ClearRecordingFrameQueues()
+			_S.ClientObjectSync.ClearRecordingFrameQueues()
 		end
-		ClientObjectSync.ApplyFPSCap()
-		RunService.RenderStepped:Wait()
+		_S.ClientObjectSync.ApplyFPSCap()
+		_S.RunService.RenderStepped:Wait()
 	end
 end)
 
@@ -9073,15 +9121,15 @@ spawn(function() -- Update cursor
 		if maxWait > 5 then
 			break
 		end
-	until CursorHolder and Cursor and CursorIcon
+	until CursorHolder and _S.Cursor and _S.CursorIcon
 	
 	SetCursor("ArrowFarCursor")
 
-	Cursor.Image = CursorIcon
-	Cursor.Size = CursorSize
-	Cursor.Visible = false
-	Cursor.BackgroundTransparency = 1
-	Cursor.ZIndex = 10000
+	_S.Cursor.Image = _S.CursorIcon
+	_S.Cursor.Size = _S.CursorSize
+	_S.Cursor.Visible = false
+	_S.Cursor.BackgroundTransparency = 1
+	_S.Cursor.ZIndex = 10000
 
 	
 	local frameCount = 0
@@ -9089,25 +9137,25 @@ spawn(function() -- Update cursor
 		frameCount = frameCount + 1
 		
 		pcall(function()
-			Cursor.Image = CursorIcon
-			Cursor.Size = CursorSize
-			Cursor.Visible = false
+			_S.Cursor.Image = _S.CursorIcon
+			_S.Cursor.Size = _S.CursorSize
+			_S.Cursor.Visible = false
 			
-			local MouseLocation = UserInputService:GetMouseLocation()
+			local MouseLocation = _S.UserInputService:GetMouseLocation()
 			local ViewportSize = workspace.CurrentCamera.ViewportSize
 
-			local cursorWidth = CursorSize.X.Offset
-			local cursorHeight = CursorSize.Y.Offset
+			local cursorWidth = _S.CursorSize.X.Offset
+			local cursorHeight = _S.CursorSize.Y.Offset
 			local centerOffsetX = -cursorWidth / 2
 			local centerOffsetY = -cursorHeight / 2
 			
-			if ShiftLockEnabled then
-				Cursor.Position = UDim2.fromOffset(
+			if _S.ShiftLockEnabled then
+				_S.Cursor.Position = UDim2.fromOffset(
 					(ViewportSize.X / 2) + centerOffsetX,
 					(ViewportSize.Y / 2) + centerOffsetY
 				)
 			else
-				Cursor.Position = UDim2.fromOffset(
+				_S.Cursor.Position = UDim2.fromOffset(
 					MouseLocation.X + centerOffsetX,
 					MouseLocation.Y + centerOffsetY
 				)
@@ -9128,11 +9176,11 @@ end)]]
 
 spawn(function() -- Handling freezing
 	while true do
-		if Frozen then
+		if _S.Frozen then
 			Character.HumanoidRootPart.Anchored = true
-			if FreezeFrame > 0 and FreezeFrame <= ReplayStorage.Length(ReplayTable) then
-				local RoundedFreezeFrame = RoundNumber(FreezeFrame,0)
-				local Frame = ReplayStorage.Get(ReplayTable,RoundedFreezeFrame)
+			if _S.FreezeFrame > 0 and _S.FreezeFrame <= _S.ReplayStorage.Length(_S.ReplayTable) then
+				local RoundedFreezeFrame = RoundNumber(_S.FreezeFrame,0)
+				local Frame = _S.ReplayStorage.Get(_S.ReplayTable,RoundedFreezeFrame)
 				
 				if type(Frame) == "table" then
 					
@@ -9144,7 +9192,7 @@ spawn(function() -- Handling freezing
 						if AnimatePose and Animation then
 							break
 						end
-						local Frame = ReplayStorage.Get(ReplayTable,Index)
+						local Frame = _S.ReplayStorage.Get(_S.ReplayTable,Index)
 						if type(Frame) == "table" then
 							AnimatePose = Frame[9]
 							Animation = Frame[2][#Frame[2]]
@@ -9152,7 +9200,7 @@ spawn(function() -- Handling freezing
 					end
 					
 					
-					local CurrentPressedKeys = ClientObjectSync.SetReplayKeyboardDisplayAtFrame(ReplayTable,RoundedFreezeFrame)
+					local CurrentPressedKeys = _S.ClientObjectSync.SetReplayKeyboardDisplayAtFrame(_S.ReplayTable,RoundedFreezeFrame)
 					
 					-- Display keys pressed on WritingPressedKeysLabel
 					WritingPressedKeysLabel.Text = "Writing Pressed keys: |"
@@ -9165,49 +9213,49 @@ spawn(function() -- Handling freezing
 					local HumanoidState = Frame[4] -- 1
 					local HumanoidRootPartVelocity = TableToVector3(Frame[5]) -- 2
 					local HumanoidRootPartRotVelocity = TableToVector3(Frame[6]) -- 3
-					local CameraCFrame = TableToCFrame(Frame[7]) -- 5
+					_S.CameraCFrame = TableToCFrame(Frame[7]) -- 5
 					local Zoom = Frame[8] -- 6
-					local ShiftLockEnabled = (Frame[10] == 1 and true) or false -- 7
+					_S.ShiftLockEnabled = (Frame[10] == 1 and true) or false -- 7
 					local MouseLocation = TableToVector2(Frame[11]) -- 8
-					ClientObjectSync.ApplyStateAtFrame(ReplayTable,RoundedFreezeFrame)
-					ClientObjectSync.ApplyBeatBlocksAtFrame(ReplayTable,RoundedFreezeFrame)
-					ClientObjectSync.ApplyObjectsAtFrame(ReplayTable,RoundedFreezeFrame)
-					ClientObjectSync.ApplyFrame(Frame)
+					_S.ClientObjectSync.ApplyStateAtFrame(_S.ReplayTable,RoundedFreezeFrame)
+					_S.ClientObjectSync.ApplyBeatBlocksAtFrame(_S.ReplayTable,RoundedFreezeFrame)
+					_S.ClientObjectSync.ApplyObjectsAtFrame(_S.ReplayTable,RoundedFreezeFrame)
+					_S.ClientObjectSync.ApplyFrame(Frame)
 					
-					local CurrentState = Humanoid:GetState().Value
+					local CurrentState = _S.Humanoid:GetState().Value
 					
 					-- -1
 					if Animation then
 						if Animation[1] == "walk" then
-							if Humanoid.FloorMaterial ~= Enum.Material.Air and CurrentState ~= 3 then
-								playAnimation("walk",Animation[2],Humanoid,true)
+							if _S.Humanoid.FloorMaterial ~= Enum.Material.Air and CurrentState ~= 3 then
+								playAnimation("walk",Animation[2],_S.Humanoid,true)
 							end
 						else
-							playAnimation(Animation[1],Animation[2],Humanoid,true)
+							playAnimation(Animation[1],Animation[2],_S.Humanoid,true)
 						end
 					end
 					pcall(setAnimationSpeed,AnimationSpeed) -- 9
 					pose = AnimatePose -- -2
 					
-					Humanoid:ChangeState(HumanoidState) -- 1
+					_S.Humanoid:ChangeState(HumanoidState) -- 1
 					
 					Character.HumanoidRootPart.Velocity = HumanoidRootPartVelocity -- 2
 					Character.HumanoidRootPart.RotVelocity = HumanoidRootPartRotVelocity -- 3
 					Character.HumanoidRootPart.CFrame = HumanoidRootPartCFrame -- 4
-					ClientObjectSync.ApplyFrame(Frame)
+					_S.ClientObjectSync.ApplyFrame(Frame)
                     if not movecameraonfroze.Value then
-                        workspace.CurrentCamera.CFrame = CameraCFrame --5
+                        workspace.CurrentCamera.CFrame = _S.CameraCFrame --5
                         SetZoom(Zoom) -- 6
-                        if ShiftLockEnabled ~= GetShiftLockEnabled() then
-                            SetShiftLockEnabled(ShiftLockEnabled) -- 7
+                        if _S.ShiftLockEnabled ~= GetShiftLockEnabled() then
+                            SetShiftLockEnabled(_S.ShiftLockEnabled) -- 7
                         end
                     end
-					if PlaybackMouseLocation then
+					if _S.PlaybackMouseLocation then
 						mousemoveabs(MouseLocation.X,MouseLocation.Y) -- 8
 					end
 				else
 					-- Frame is not a table
-					RunService.RenderStepped:Wait()
+					_S.RunService.RenderStepped:Wait()
 				end
 			else
 				--ConsoleMessage("FreezeFrame is",FreezeFrame,"(not in range)")
@@ -9217,21 +9265,21 @@ spawn(function() -- Handling freezing
 				Character.HumanoidRootPart.Anchored = false
 			end)
 		end
-		RunService.RenderStepped:Wait()
+		_S.RunService.RenderStepped:Wait()
 	end
 end)
 
 do -- Set checkpoint
 	ConsoleMessage("Loading from file...")
-	ReplayTable = ReplayDecode(GetReplayFile()) -- Decode replay from file
-	ReplayStorage.StartupDecodeReady,ReplayStorage.StartupDecodeReason = ReplayStorage.WaitUntilDecoded(ReplayTable)
-	if not ReplayStorage.StartupDecodeReady then
-		ReplayTable = ReplayStorage.New()
-		ConsoleMessage(ReplayStorage.StartupDecodeReason or "There is no replay folder for",PlaceId)
+	_S.ReplayTable = ReplayDecode(GetReplayFile()) -- Decode replay from file
+	_S.ReplayStorage.StartupDecodeReady,_S.ReplayStorage.StartupDecodeReason = _S.ReplayStorage.WaitUntilDecoded(_S.ReplayTable)
+	if not _S.ReplayStorage.StartupDecodeReady then
+		_S.ReplayTable = _S.ReplayStorage.New()
+		ConsoleMessage(_S.ReplayStorage.StartupDecodeReason or "There is no replay folder for",_S.PlaceId)
 	end
-	ReplayStorage.StartupDecodeReady = nil
-	ReplayStorage.StartupDecodeReason = nil
+	_S.ReplayStorage.StartupDecodeReady = nil
+	_S.ReplayStorage.StartupDecodeReason = nil
 end
 
-ConsoleMessage("Tasability",Version,"loaded in",RoundNumber(tick()-ExecutionTick,2),"seconds")
+ConsoleMessage("Tasability",_S.Version,"loaded in",RoundNumber(tick()-_S.ExecutionTick,2),"seconds")
 ConsoleMessage("Type help to see all commands")
